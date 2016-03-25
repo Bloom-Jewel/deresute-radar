@@ -1,3 +1,5 @@
+# Distributed .git data from http://github.com/ReiFan49/deresute-radar
+
 # Auto detect text files and perform LF normalization
 * text=auto
 
@@ -23,3 +25,5 @@
 # Python
 *.py diff=python
 
+# Java
+*.java diff=java
