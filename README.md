@@ -4,9 +4,9 @@ Mini program that performs various lookup on available charts from http://cgss.c
 
 ## Language
 
-- Ruby (base)
-- Python (port)
-- Java (port)
+- [Ruby](https://github.com/ReiFan49/deresute-radar) (base)
+- [Python](https://github.com/ReiFan49/deresute-radar-py) (port)
+- [Java](https://github.com/ReiFan49/deresute-radar-java) (port)
 
 ## Dependency
 
@@ -19,27 +19,6 @@ Mini program that performs various lookup on available charts from http://cgss.c
         - OpenURI
     
     - Online Gems
-
-        Not yet
-    
-- Python (>= 3.4.x)
-
-    - Standard Library
     
         Not yet
     
-    - Online Plugins
-
-        Not yet
-    
-- Java (>= 1.8)
-
-    - Standard Library
-    
-        Not yet
-    
-    - Online Plugins
-    
-        Not yet
-    
-
