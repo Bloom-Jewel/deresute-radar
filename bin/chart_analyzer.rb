@@ -18,7 +18,7 @@ class Radar
       60 * Rational(c[:note_count],c[:song_length]) * Rational(2,3)
     },
     voltage:->(c){
-      Rational(c[:natural_time] * (Math.log(c[:peak_density],4) + 1),4) * Rational(4,5)
+      Rational(c[:natural_time] * (Math.log(c[:peak_density],3) + 1),4) * Rational(4,5)
     },
     freeze: ->(c){
       1000 * Rational(c[:hold_length],c[:song_length]) * Rational(30,100)
@@ -150,7 +150,7 @@ class ChartAnalyzer
               }.first - 1,
               0
             ].max
-            radar[:slide_power] += ([so.size-5,0].max * 1.1) ** 1.1
+            radar[:slide_power] += ( ([so.size-5,0].max * 1.1) * (1 + (slide.end.time - slide.start.time) ** 0.8) ) ** 1.1
           }
           radar[:slide_count] += sp.size
           
@@ -180,6 +180,7 @@ class ChartAnalyzer
           
           # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
           # puts "%s_%s voltage:%7.3f common:%7.3f average:%7.3f natural:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:common_time],radar[:average_time],radar[:natural_time],radar[:peak_density]]
+          # puts "%s_%s slide:%7.3f count:%3d kicks:%3d power:%7.3f" % [song_id,diff_id,radar.raw_slide,radar[:slide_count],radar[:slide_kicks],radar[:slide_power]]
         end
       end
     end
