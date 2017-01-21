@@ -18,7 +18,7 @@ class Radar
       60 * Rational(c[:note_count],c[:song_length]) * Rational(2,3)
     },
     voltage:->(c){
-      Rational(c[:natural_time] * (Math.log(c[:peak_density],3) + 1),4) * Rational(4,5)
+      Rational(c[:natural_time] * (Math.log(c[:peak_density],3) + 3),4) * Rational(4,5)
     },
     freeze: ->(c){
       1000 * Rational(c[:hold_length],c[:song_length]) * Rational(30,100)
@@ -158,7 +158,7 @@ class ChartAnalyzer
           n.map(&:time).sort.tap { |times|
             zt = times.dup
             xt = []
-            ct = n.select{|x|x.is_a? TapNote}.map(&:time).uniq.each_cons(2).map { |(x,y)| (y-x).round(6) }
+            ct = n.select{|x|x.is_a? TapNote}.map(&:time).uniq.sort.each_cons(2).map { |(x,y)| (y-x).round(6) }
             radar[:common_time]  = ct.group_by{|x|x}.map{|k,v|[k,v.size]}.max{|x|x.last}.first
             radar[:average_time] = ct.inject(:+).fdiv(ct.size)
             radar[:natural_time] = Rational(60,radar[:common_time] + (radar[:average_time] - radar[:common_time]) * 0.3)
