@@ -161,7 +161,10 @@ class ChartAnalyzer
             ct = n.select{|x|x.is_a? TapNote}.map(&:time).uniq.sort.each_cons(2).map { |(x,y)| (y-x).round(6) }
             radar[:common_time]  = ct.group_by{|x|x}.map{|k,v|[k,v.size]}.max{|x|x.last}.first
             radar[:average_time] = ct.inject(:+).fdiv(ct.size)
-            radar[:natural_time] = Rational(60,radar[:common_time] + (radar[:average_time] - radar[:common_time]) * 0.3)
+            [radar[:common_time],radar[:average_time]].tap { |(a,b)|
+              a,b = b,a if b < a
+              radar[:natural_time] = Rational(60,a + (b - a) * 0.3)
+            }
             
             radar[:peak_density] = times.uniq.map{|time|
               xt.shift while !xt.empty? && xt.first < time
