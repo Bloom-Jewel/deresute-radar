@@ -13,6 +13,7 @@ def GlobalConstDeclare(mod)
     setGlobalConst = proc { |context, constLimit=nil|
       context.constants.each { |constData|
         constRef = context.const_get(constData)
+        next if constData == :BasicObject
         if((constLimit.nil? || constLimit > 1) && constRef.is_a?(Module)) then
           unless Kernel.const_defined?(constData)
             if constRef.is_a?(Class)

@@ -13,7 +13,66 @@ module Deresute
   class ImportedSong < RawJSON
   end
   class ImportedChart < RawJSON
-    
+    def build(**options)
+      ChartBuilder.new(Chart,@raw) do |raw|
+        options.each do |key,value|
+          set_property key,value
+        end
+        
+        raw[:chartData].tap do |chart_data|
+          # First iteration - define notes
+          chart_data.each do |note_data|
+            next unless [1,2].include? note_data[:type]
+            define_note id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], way:note_data[:status]
+          end
+          
+          m = {h:{},s:{},p:[]}
+          # Second iteration - define holds
+          chart_data.select { |note_data| note_data[:type].between?(1,2) }
+            .tap do |hold_list|
+              hs = [0,0,0,0,0,0]
+              hold_list.each do |hold_data|
+                i,j,k = *hold_data.values_at(:id,:type,:finishPos)
+                if hs[k].nonzero? then
+                  m[:h][ hs[k] ] = define_hold(hs[k],i)
+                  hs[k] = 0
+                elsif j == 2 then
+                  hs[k] = i
+                end
+                # ::Kernel.p hs if get_property(:difficulty) > 2
+              end
+              
+              if hs.any?(&:nonzero?) then
+                ::STDERR.puts "Stalling hold note detected"
+              end
+            end
+          
+          # Third iteration - define slides
+          chart_data.select { |note_data| note_data[:groupId].nonzero? }
+            .group_by { |note_data| note_data[:groupId] }
+            .each do |group_id,note_list|
+              begin
+                m[:s][group_id] = define_slide(*note_list.map{|note|note[:id]})
+              rescue TypeError
+                ::STDERR.puts "Bad slide chain detected: #{note_list.map(&:inspect) * ', '}"
+              end
+            end
+          
+          # Fourth iteration - define pairs
+          chart_data.select { |note_data| note_data[:sync].nonzero? }
+            .group_by { |note_data| note_data[:sec] }
+            .each do |pair_time,pair_note|
+              if pair_note.size != 2 then
+                ::STDERR.puts "Bad pair setup detected"
+              else
+                m[:p] << define_pair(*pair_note.map{|note|note[:id]})
+              end
+            end
+          
+          @holds, @slides, @pairs = m.values_at(:h,:s,:p)
+        end
+      end
+    end
   end
   
   class Song
@@ -22,11 +81,13 @@ module Deresute
     # constructor
     def initialize(build_data)
       fail TypeError, "Expected builder class!" unless ObjectSpace.each_object(ChartBuilder).to_a.include?(build_data)
-      build_data.instance_exec do
-        set :diff    , get_property :difficulty
-        set :notes   , get_notes
-        set :slides  , get_slides
-        set :timeline, get_patterns
+      build_data.instance_exec(method(:get),method(:set)) do |get,set|
+        set.call :diff    , get_property(:difficulty)
+        set.call :checksum, get_property(:hash)
+        set.call :notes   , get_notes
+        set.call :holds   , get_holds
+        set.call :slides  , get_slides
+        set.call :pairs   , get_pairs
       end
     end
     
@@ -47,11 +108,28 @@ module Deresute
     
     # public methods
     public
-    def each_notes
-      @notes.each
+    def notes;@notes;end
+    def holds;@holds;end
+    def slides;@slides;end
+    def pairs;@pairs;end
+    def inspect
+      "<%s diff:%d note:%d hold:%d slide:%d pair:%d>" % [
+        self.class,
+        @diff.to_i,
+        @notes.size,
+        @holds.size,
+        @slides.size,
+        @pairs.size,
+      ]
     end
-    def each_slides
-      @slides.each
+    
+    def method_missing(m,*a,&b)
+      if instance_variable_defined?("@#{m}") then
+        self.class.class_exec { define_method("#{m}") { instance_variable_get("@#{m}") } }
+        send m
+      else
+        super(m,*a,&b)
+      end
     end
     
     # class methods
@@ -69,19 +147,22 @@ module Deresute
   class Chart < BasicChart
   end
   
-  class ChartBuilder < BasicObject
+  class ChartBuilder < ::BasicObject
     'Builder based class are formed through DSL'
     'Structure priority'
     '- Pair'
     '- Hold'
     '- Slide'
     '- Tap'
+    # constants
+    
     # constructor
     def initialize
       @options = {}
       @notes = {}
+      @holds = {}
       @slides = {}
-      @pattern = []
+      @pairs = []
     end
     
     # accessors
@@ -96,12 +177,16 @@ module Deresute
       @notes
     end
     
+    def get_holds
+      @holds
+    end
+    
     def get_slides
       @slides
     end
     
-    def get_patterns
-      @pattern
+    def get_pairs
+      @pairs
     end
     
     def set_property(key,val)
@@ -109,28 +194,37 @@ module Deresute
     end
     
     def define_note(id:,at:,pos1:,pos2:,way:false)
-      noteitem = if way.is_a? Fixnum then
-                   FlickNote(way,at,pos2,pos1)
+      noteitem = if way.is_a?(::Fixnum) && way.nonzero? then
+                   FlickNote.new(way,at,pos2,pos1)
                  else
-                   TapNote(at,pos2,pos1)
+                   TapNote.new(at,pos2,pos1)
                  end
+                 
       @notes.store(id,noteitem)
     end
     
-    def define_hold(note1, note2)
-      HoldNote(note1,note2)
-    end
-    
-    def define_pair(note1, note2)
-      PairNotes(note1,note2)
-    end
-    
-    def define_slide(*notes)
-      SlideNotes(*notes)
-    end
+    ->(){
+      note_checker = ->(ary){
+        ary.each_index do |i|
+          o = ary[i]
+          if @notes.has_key? o then
+            ary[i] = @notes[o]
+          elsif !(o.is_a?(BaseNote) || o.is_a?(MixNotes)) then
+            fail ::TypeError, "Expected BaseNote or MixNotes class, given #{o.class}"
+          end
+        end
+      }
+      
+      ['Hold','Pair','Slide'].each do |type|
+        define_method(:"define_#{type.downcase}") do |*notes|
+          self.instance_exec(notes,&note_checker)
+          ChartBuilder.const_get(:"#{type}Note").new(*notes)
+        end
+      end
+    }.call
     
     def add_pattern(note)
-      fail TypeError, "Expected BaseNote or MixNotes class, given #{note.class}" unless note.is_a? BaseNote || note.is_a? MixNotes
+      fail ::TypeError, "Expected BaseNote or MixNotes class, given #{note.class}" unless note.is_a?(BaseNote) || note.is_a?(MixNotes)
       @pattern << note
     end
     
@@ -159,8 +253,8 @@ module Deresute
         fail TypeError, "Expected BasicChart class, given #{klass}" unless klass.ancestors.include? BasicChart
        
         if block.is_a? Proc then
-          builder = _df_new(*args)
-          yield builder
+          builder = _df_new
+          builder.instance_exec(*args,&block)
           klass.new(builder)
         end
       end
@@ -171,6 +265,8 @@ module Deresute
     "Represents a standard definition of a note
     "
     TimingModes = [:exact,:rhythmic].freeze
+    
+    @@timing_mode = nil
     
     # constructor
     def initialize(time,pos,source=nil)
@@ -208,10 +304,10 @@ module Deresute
       self.time = @time
     end
     def pos=(pos)
-      @pos  = ((pos.to_i() if pos.to_i.between?(1..5)) rescue @pos)
+      @pos  = ((pos.to_i if pos.to_i.between?(1,5)) rescue @pos)
     end
     def cpos=(cpos)
-      @cpos = ((cpos.to_i() if cpos.nil? || cpos.to_i.between?(1..5)) rescue @cpos)
+      @cpos = ((cpos.to_i() if cpos.nil? || cpos.to_i.between?(1,5)) rescue @cpos)
     end
     
     # private methods
@@ -243,9 +339,9 @@ module Deresute
           ObjectSpace.each_object(cls,&:time!)
         }
       end
-      
-      timing_mode = nil
     end
+    
+    self.timing_mode = nil
   end
   class TapNote < BaseNote
   end
@@ -254,8 +350,9 @@ module Deresute
     # constructor
     def initialize(face,time,position,source=nil)
       fail TypeError,sprintf("Expecting Integer, given %s for Note Facing",
-        face.class) unless [Fixnum].any? { |cls| cls === time }
+        face.class) unless [Fixnum].any? { |cls| cls === face }
       self.dir = face
+      super(time,position,source)
     end
     
     # accessors
@@ -349,10 +446,10 @@ module Deresute
       @setOfItem[key]=value
     end
     def start
-      @setOfNote.first
+      @setOfItem.first
     end
     def end
-      @setOfNote.last
+      @setOfItem.last
     end
     
     # private methods
@@ -360,8 +457,8 @@ module Deresute
     def type_checker(item,idx)
       if @indexLock then
         # Perform looping index-based type checker
-        baseClass = @arraySCls[idx % @arraySCls.size] rescue nil;
-        direClass = @arrayDCls[idx % @arrayDCls.size] rescue nil;
+        baseClass = @arraySCls[idx % @arraySCls.size] rescue nil
+        direClass = @arrayDCls[idx % @arrayDCls.size] rescue nil
         unless (item.is_a?(baseClass) rescue false) ||
           (item.instance_of?(direClass) rescue false) then
           
@@ -440,6 +537,15 @@ module Deresute
     def pop(count=1);master_array_remove(__method__,count);end
     def shift(count=1);master_array_remove(__method__,count);end
     
+    def to_s
+      "#<%s:%#016x notes:%s>" % [
+        self.class,
+        self.__id__,
+        @setOfItem
+      ]
+    end
+    alias :inspect :to_s
+    
     # class methods
     class << self
       # private static methods
@@ -489,6 +595,20 @@ module Deresute
       super(slideChain,[],[FlickNote],true,true,2..Float::INFINITY)
     end
   end
+  
+  [
+    [:BaseNote ,BaseNote],
+    [:TapNote  ,TapNote],
+    [:FlickNote,FlickNote],
+    
+    [:MixNotes ,MixNotes],
+    [:PairNote ,PairNotes],
+    [:HoldNote ,HoldNote],
+    [:SlideNote,SlidePath]
+  ].each do |(const_name,const_data)|
+    ChartBuilder.const_set const_name, const_data
+  end
+
   GlobalConstDeclare(self)
 end
 

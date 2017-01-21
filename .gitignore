@@ -7,9 +7,11 @@ port-*
 # bin/
 
 # Ignore chart data
+analyze/
 charts/
 charts.old/
 charts.revised/
+*.chartcache
 
 # =========================
 # Operating System Files

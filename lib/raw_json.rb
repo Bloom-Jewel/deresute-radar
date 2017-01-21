@@ -35,7 +35,7 @@ class RawJSON
   # public methods
   public
   def each(&block)
-    @raw.each &block
+    @raw.each(&block)
   end
   def to_str; @raw.to_s; end
   def to_hash; @raw.dup(); end
@@ -52,7 +52,7 @@ class RawJSON
   def to_json(*args)
     as_json.to_json(*args)
   end
-  
+    
   class << self
     def json_create(object)
       new(object)
@@ -60,16 +60,15 @@ class RawJSON
     
     def load(filename)
       if Object.const_defined?('JSON')
-        JSON.load(File.read(filename),encoding:'UTF-8',object_class: self)
+        new({chartData:JSON.load(File.read(filename,encoding:'UTF-8'))})
       end
     end
   end
   
   if Object.const_defined?('JSON')
-    JSON.load_default_options.merge! {
-      object_class: RawJSON,
+    JSON.load_default_options.merge!({
       symbolize_names: true
-    }
+    })
   end
   
   GlobalConstDeclare(self);
