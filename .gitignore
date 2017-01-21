@@ -12,6 +12,7 @@ charts/
 charts.old/
 charts.revised/
 *.chartcache
+*.log
 
 # =========================
 # Operating System Files
