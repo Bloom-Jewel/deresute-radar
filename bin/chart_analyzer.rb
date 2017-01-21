@@ -18,13 +18,13 @@ class Radar
       60 * Rational(c[:note_count],c[:song_length]) * Rational(2,3)
     },
     voltage:->(c){
-      Rational(c[:natural_time] * c[:peak_density],4) * Rational(4,5)
+      Rational(c[:natural_time] * (Math.log(c[:peak_density],4) + 1),4) * Rational(4,5)
     },
     freeze: ->(c){
       1000 * Rational(c[:hold_length],c[:song_length]) * Rational(30,100)
     },
     slide:  ->(c){
-      60 * Rational(Rational(c[:slide_count],5) + Rational(c[:slide_kicks],1) + Rational(c[:slide_power] * 9,4) ** 1.1,c[:song_length]) * Rational(5,4)
+      60 * Rational(Rational(c[:slide_count],5) + Rational(c[:slide_kicks],1) + Rational(c[:slide_power] * 9,4),c[:song_length]) * Rational(5,4)
     },
     air:    ->(c){
       60 * Rational(c[:pair_count],c[:song_length]) * Rational(4,3)
@@ -150,7 +150,7 @@ class ChartAnalyzer
               }.first - 1,
               0
             ].max
-            radar[:slide_power] += [so.size-5,0].max
+            radar[:slide_power] += ([so.size-5,0].max * 1.1) ** 1.1
           }
           radar[:slide_count] += sp.size
           
@@ -159,13 +159,13 @@ class ChartAnalyzer
             zt = times.dup
             xt = []
             ct = n.select{|x|x.is_a? TapNote}.map(&:time).uniq.each_cons(2).map { |(x,y)| (y-x).round(6) }
-            radar[:common_time]  = ct.group_by{|x|x}.map{|k,v|[k,v.size]}.max{|x|x.last}.last
+            radar[:common_time]  = ct.group_by{|x|x}.map{|k,v|[k,v.size]}.max{|x|x.last}.first
             radar[:average_time] = ct.inject(:+).fdiv(ct.size)
             radar[:natural_time] = Rational(60,radar[:common_time] + (radar[:average_time] - radar[:common_time]) * 0.3)
             
             radar[:peak_density] = times.uniq.map{|time|
               xt.shift while !xt.empty? && xt.first < time
-              xt.push zt.shift while (xt.last.nil? || xt.last < time+volt_length) && !zt.empty?
+              xt.push zt.shift while !zt.empty? && (xt.last.nil? || xt.last < time+volt_length)
               xt.size
             }.max
           }
@@ -177,6 +177,9 @@ class ChartAnalyzer
               max_aspect[cat][1] = "%3s_%s" % [song_id,diff_id]
             end
           end
+          
+          # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
+          # puts "%s_%s voltage:%7.3f common:%7.3f average:%7.3f natural:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:common_time],radar[:average_time],radar[:natural_time],radar[:peak_density]]
         end
       end
     end
@@ -199,8 +202,8 @@ class ChartAnalyzer
         end
       end
     end
-  rescue
-    STDERR.puts "Ignoring Database..."
+  rescue Exception => e
+    STDERR.puts "Ignoring Database... (#{e.class}: #{e.message})"
   end
   
   def method_missing(m,*a,&b)
