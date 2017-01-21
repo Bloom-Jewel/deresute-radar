@@ -90,6 +90,7 @@ class ChartAnalyzer
     }
     
     analyze_charts
+    refresh_radar
   end
   
   def analyze_charts
@@ -154,16 +155,16 @@ class ChartAnalyzer
           radar[:slide_count] += sp.size
           
           # Voltage
-          n.map(&:time).tap { |times|
+          n.map(&:time).sort.tap { |times|
             zt = times.dup
             xt = []
             ct = n.select{|x|x.is_a? TapNote}.map(&:time).uniq.each_cons(2).map { |(x,y)| (y-x).round(6) }
             radar[:common_time]  = ct.group_by{|x|x}.map{|k,v|[k,v.size]}.max{|x|x.last}.last
             radar[:average_time] = ct.inject(:+).fdiv(ct.size)
-            radar[:natural_time] = Rational(60,radar[:common_time] + (radar[:common_time] - radar[:average_time]) * 0.1)
+            radar[:natural_time] = Rational(60,radar[:common_time] + (radar[:average_time] - radar[:common_time]) * 0.3)
             
             radar[:peak_density] = times.uniq.map{|time|
-              xt.reject! { |xnt| xnt < time }
+              xt.shift while !xt.empty? && xt.first < time
               xt.push zt.shift while (xt.last.nil? || xt.last < time+volt_length) && !zt.empty?
               xt.size
             }.max
@@ -176,12 +177,30 @@ class ChartAnalyzer
               max_aspect[cat][1] = "%3s_%s" % [song_id,diff_id]
             end
           end
-          
-          puts "%3s_%s n:%4d h:%4d s:%4d p:%4d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
         end
       end
     end
-    p max_aspect
+  end
+  
+  def refresh_radar
+    require 'sqlite3'
+    SQLite3::Database.new File.join(ENV['HOME'],'pre-saijue','db','production.sqlite3') do |db|
+      @radars.each do |key,radarlist|
+        radarlist.each_with_index do |radar,diff|
+          res = []
+          Radar::Categories.keys.each do |cat|
+            res << radar.send("raw_#{cat}").to_f
+          end
+          res.push Integer(key,10),diff.succ
+          db.execute(
+            'UPDATE deresute_charts SET r_stream = ?, r_voltage = ?, r_freeze = ?, r_slide = ?, r_air = ?, r_chaos = ? WHERE chartset_id = ? AND difficulty = ?',
+            *res
+          )
+        end
+      end
+    end
+  rescue
+    STDERR.puts "Ignoring Database..."
   end
   
   def method_missing(m,*a,&b)

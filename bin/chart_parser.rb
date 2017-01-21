@@ -26,7 +26,7 @@ class ChartParser
     @charts.map { |fn|
       cc = nil
       d = /(\d+)_(\d)/.match(fn)
-      ffn = "charts/#{d[0]}.chartcache"
+      ffn = "analyzer/#{d[0]}.chartcache"
       cvd = false
       begin
         cc = Marshal.load(File.read(ffn))
