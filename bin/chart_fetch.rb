@@ -7,6 +7,7 @@ require 'neatjson'
 require 'find'
 require 'uri'
 
+require_relative '../lib/framework.rb'
 require_relative '../lib/final_class.rb'
 require_relative '../lib/deremod.rb'
 
@@ -79,7 +80,7 @@ chart_fetch = Module.new() {
           end
         }
       end
-      listData = JSON.parse(File.read(listName,encoding:'UTF-8'))
+      listData = JSON.parse(File.read(listName,encoding:'UTF-8'),symbolize_names:true)
     }
 
     define_method(:fetch_chart) { |targetDir|
@@ -100,7 +101,7 @@ chart_fetch = Module.new() {
           destName   = File.join(targetDir,"#{chartName}.json")
           diffTitle  = "#{songData[:musicTitle]}"
           
-          if(songData['type'] == 4)
+          if(songData[:type] == 4)
             diffTitle = diffTitle.each_char.each_with_index.collect { |x,i| "\x1b[3#{rainKey[i % rainKey.length]}m#{x}" }.join('')
             rainKey.rotate!
           end
@@ -150,10 +151,10 @@ chart_fetch = Module.new() {
     define_method(:main) { |*argv|
       cdate = Time.now()
       
-      chartDir = "../data"
+      chartDir = "charts"
       
       check_connection
-      if noPurge then
+      if !noPurge then
         chart_purge(chartDir)
         fetch_list(chartDir)
         fetch_chart(chartDir)
@@ -167,8 +168,10 @@ chart_fetch = Module.new() {
 # OpenSSL::SSL::VERIFY_PEER = OpenSSL::SSL::VERIFY_NONE
 
 # Inclusion Check
-if __FILE__ == $0
-  chart_fetch.main(*ARGV)
+if is_main_file
+  define_method(:main) { |*argv|
+    chart_fetch.main(*argv)
+  }
 else
   $stderr.puts "execute #chartFetchMain to run this"
   define_method(:chart_fetch_main) { |*argv|
