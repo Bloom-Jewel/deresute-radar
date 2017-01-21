@@ -7,7 +7,7 @@ port-*
 # bin/
 
 # Ignore chart data
-analyze/
+analyzer/
 charts/
 charts.old/
 charts.revised/
