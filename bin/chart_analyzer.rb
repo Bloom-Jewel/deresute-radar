@@ -24,7 +24,14 @@ class Radar
       1000 * Rational(c[:hold_length],c[:song_length]) * Rational(30,100)
     },
     slide:  ->(c){
-      60 * Rational(Rational(c[:slide_count],5) + Rational(c[:slide_kicks],1) + Rational(c[:slide_power] * 9,4),c[:song_length]) * Rational(5,4)
+      60 * Rational(c[:slide_length] + Rational(
+        [
+          Rational(c[:slide_count] * 1,10),
+          Rational(c[:slide_kicks] * 1, 2),
+          Rational(c[:slide_power] * 7, 4)
+        ].inject(:+),
+        1
+      ),c[:song_length]) * Rational(5,4)
     },
     air:    ->(c){
       60 * Rational(c[:pair_count],c[:song_length]) * Rational(4,3)
@@ -96,8 +103,11 @@ class ChartAnalyzer
   def analyze_charts
     volt_length = 1.0
     max_aspect = {}
+    loop_count = 0
     @charts.each do |song_id,charts|
       charts.each_with_index do |chart,diff_id|
+        loop_count += 1
+        GC.start if (loop_count % 20).zero?
         @radars[song_id][diff_id].tap do |radar|
           n = chart.notes.values
           h = chart.holds.values
@@ -150,7 +160,10 @@ class ChartAnalyzer
               }.first - 1,
               0
             ].max
-            radar[:slide_power] += ( ([so.size-5,0].max * 1.1) * (1 + (slide.end.time - slide.start.time) ** 0.8) ) ** 1.1
+            radar[:slide_length] += slide.end.time - slide.start.time
+            slide_chain_power  = [radar[:slide_count] + radar[:slide_kicks] - 5,0].max * 0.025
+            slide_length_power = (1 + radar[:slide_length]) ** 0.8
+            radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.9
           }
           radar[:slide_count] += sp.size
           
