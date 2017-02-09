@@ -38,6 +38,7 @@ class ChartParser
       end if File.file?(ffn)
       unless cvd
         c = ImportedChart.load(fn)
+        # puts "#{fn} #{c[:chartData].class}"
         cc = c.build(
           difficulty:d[1].to_i,
           hash:Digest::SHA256.file(fn).hexdigest

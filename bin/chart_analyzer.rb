@@ -26,7 +26,7 @@ class Radar
     slide:  ->(c){
       60 * Rational(c[:slide_length] + Rational(
         [
-          Rational(c[:slide_count] * 1,10),
+          Rational(c[:flick_count] * 1,10),
           Rational(c[:slide_kicks] * 1, 2),
           Rational(c[:slide_power] * 7, 4)
         ].inject(:+),
@@ -69,6 +69,9 @@ class Radar
     Categories.map { |r,f|
       "%s:%7.3f" % [r,f.call(@counter)]
     }.join(' ')
+  end
+  def values_at(*keys)
+    @counter.values_at(*keys)
   end
   
   Categories.each do |radar,formula|
@@ -131,8 +134,10 @@ class ChartAnalyzer
             .tap { |holds|
             radar[:hold_length] = holds.map(&:last).inject(:+)
           }
+          radar[:hold_count]  = h.size
           
           # Slide
+          radar[:flick_count] = 0
           radar[:slide_count] = 0
           radar[:slide_kicks] = 0
           radar[:slide_power] = 0
@@ -144,7 +149,7 @@ class ChartAnalyzer
             # Find flick that is not slides
             sp.delete(so.first)
             
-            radar[:slide_count] += so.size
+            radar[:flick_count] += so.size
             radar[:slide_kicks] += [
               so.inject([nil,0]) { |memo,flick|
                 if memo[0].nil?
@@ -161,11 +166,12 @@ class ChartAnalyzer
               0
             ].max
             radar[:slide_length] += slide.end.time - slide.start.time
-            slide_chain_power  = [radar[:slide_count] + radar[:slide_kicks] - 5,0].max * 0.025
+            slide_chain_power  = [radar[:flick_count] + radar[:slide_kicks] - 5,0].max * 0.025
             slide_length_power = (1 + radar[:slide_length]) ** 0.8
             radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.9
           }
-          radar[:slide_count] += sp.size
+          radar[:slide_count] = s.size
+          radar[:flick_count] += sp.size
           
           # Voltage
           n.map(&:time).sort.tap { |times|
@@ -186,6 +192,8 @@ class ChartAnalyzer
             }.max
           }
           
+          radar[:combo_count] = n.size
+          
           Radar::Categories.keys.each do |cat|
             max_aspect[cat] ||= []
             if max_aspect[cat].empty? || radar.send("raw_#{cat}") > max_aspect[cat][0] then
@@ -196,7 +204,7 @@ class ChartAnalyzer
           
           # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
           # puts "%s_%s voltage:%7.3f common:%7.3f average:%7.3f natural:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:common_time],radar[:average_time],radar[:natural_time],radar[:peak_density]]
-          # puts "%s_%s slide:%7.3f count:%3d kicks:%3d power:%7.3f" % [song_id,diff_id,radar.raw_slide,radar[:slide_count],radar[:slide_kicks],radar[:slide_power]]
+          # puts "%s_%s slide:%7.3f count:%3d kicks:%3d power:%7.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:slide_kicks],radar[:slide_power]]
         end
       end
     end
@@ -211,9 +219,14 @@ class ChartAnalyzer
           Radar::Categories.keys.each do |cat|
             res << radar.send("raw_#{cat}").to_f
           end
+          res.push(*radar.values_at(:note_count,:hold_count,:pair_count,:flick_count,:slide_count,:combo_count))
           res.push Integer(key,10),diff.succ
           db.execute(
-            'UPDATE deresute_charts SET r_stream = ?, r_voltage = ?, r_freeze = ?, r_slide = ?, r_air = ?, r_chaos = ? WHERE chartset_id = ? AND difficulty = ?',
+            "UPDATE deresute_charts " +
+            "SET " + 
+            "r_stream = ?, r_voltage = ?, r_freeze = ?, r_slide = ?, r_air = ?, r_chaos = ?, " +
+            "count_notes = ?, count_holds = ?, count_syncs = ?, count_flicks = ?, count_slides = ?, count_combos = ? " +
+            "WHERE chartset_id = ? AND difficulty = ?",
             *res
           )
         end
@@ -237,3 +250,4 @@ class ChartAnalyzer
 end
 
 def main(*argv); ChartAnalyzer.main(*argv); end if is_main_file
+
