@@ -241,13 +241,18 @@ class ChartAnalyzer
           Radar::Categories.keys.each do |cat|
             res << radar.send("raw_#{cat}").to_f
           end
-          res.push(*radar.values_at(:note_count,:hold_count,:pair_count,:flick_count,:slide_count,:combo_count))
+          res.push(*radar.values_at(
+            :note_count,  :hold_count,  :pair_count,
+            :flick_count, :slide_count, :shold_count,
+            :combo_count, :song_length
+          ))
           res.push Integer(key,10),diff.succ
           db.execute(
             "UPDATE deresute_charts " +
             "SET " + 
             "r_stream = ?, r_voltage = ?, r_freeze = ?, r_slide = ?, r_air = ?, r_chaos = ?, " +
-            "count_notes = ?, count_holds = ?, count_syncs = ?, count_flicks = ?, count_slides = ?, count_combos = ? " +
+            "count_notes = ?, count_holds = ?, count_syncs = ?, count_flicks = ?, count_slides = ?, count_sholds = ?, count_combos = ?," +
+            "song_length = ? " +
             "WHERE chartset_id = ? AND difficulty = ?",
             *res
           )
