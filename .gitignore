@@ -1,16 +1,17 @@
 # Distributed .git data from http://github.com/ReiFan49/deresute-radar
 
 # Ignore local symbolic links
-port-*
+/port-*
 
 # Ignore compiled data
 # bin/
 
 # Ignore chart data
-analyzer/
-charts/
-charts.old/
-charts.revised/
+/analyzer/
+/charts
+/charts/
+/charts.old/
+/charts.revised/
 *.chartcache
 *.log
 
