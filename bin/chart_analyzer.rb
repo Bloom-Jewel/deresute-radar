@@ -137,6 +137,7 @@ class ChartAnalyzer
           radar[:hold_count]  = h.size
           
           # Slide
+          radar[:shold_count] = 0
           radar[:flick_count] = 0
           radar[:slide_count] = 0
           radar[:slide_kicks] = 0
@@ -151,18 +152,38 @@ class ChartAnalyzer
             
             radar[:flick_count] += so.size
             radar[:slide_kicks] += [
-              so.inject([nil,0]) { |memo,flick|
-                if memo[0].nil?
-                  memo[0] = flick.dir
-                else
-                  if memo[0] != flick.dir
+              so.inject([nil,nil,0]) { |memo,flick|
+                case flick
+                when SuperNote
+                  radar[:shold_count] += 1
+                  case memo[1]
+                  when SuperNote
+                    radar[:hold_length] += flick.time - memo[1].time
+                    if memo[0] != flick.pos
+                      memo[0] = flick.pos
+                      memo[-1]+= 1
+                    end
+                  else
+                    memo[0] = flick.pos
+                  end
+                when FlickNote
+                  case memo[1]
+                  when FlickNote
+                    if memo[0] != flick.dir
+                      memo[0] = flick.dir
+                      memo[-1]+= 1
+                    end
+                  when SuperNote
+                    radar[:hold_length] += flick.time - memo[1].time
                     memo[0] = flick.dir
-                    memo[1]+= 1
+                  else
+                    memo[0] = flick.dir
                   end
                 end
+                memo[1] = flick
                 
                 memo
-              }.first - 1,
+              }.last - 1,
               0
             ].max
             radar[:slide_length] += slide.end.time - slide.start.time

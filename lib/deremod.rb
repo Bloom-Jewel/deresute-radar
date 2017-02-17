@@ -22,8 +22,8 @@ module Deresute
         raw[:chartData].tap do |chart_data|
           # First iteration - define notes
           chart_data.each do |note_data|
-            next unless [1,2].include? note_data[:type]
-            define_note id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], way:note_data[:status]
+            next unless [1,2,3].include? note_data[:type]
+            define_note id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], way:note_data[:status], type: note_data[:type]
           end
           
           m = {h:{},s:{},p:[]}
@@ -193,13 +193,15 @@ module Deresute
       @options.store(key,val)
     end
     
-    def define_note(id:,at:,pos1:,pos2:,way:false)
+    def define_note(id:,at:,pos1:,pos2:,type:,way:false)
       noteitem = if way.is_a?(::Fixnum) && way.nonzero? then
                    FlickNote.new(way,at,pos2,pos1)
+                 elsif type == 3
+                   SuperNote.new(at,pos2,pos1)
                  else
                    TapNote.new(at,pos2,pos1)
                  end
-                 
+      
       @notes.store(id,noteitem)
     end
     
@@ -344,6 +346,8 @@ module Deresute
     self.timing_mode = nil
   end
   class TapNote < BaseNote
+  end
+  class SuperNote < BaseNote
   end
   class FlickNote < BaseNote
     "Class Description"
@@ -592,13 +596,14 @@ module Deresute
     
     # constructor
     def initialize(*slideChain)
-      super(slideChain,[],[FlickNote],true,true,2..Float::INFINITY)
+      super(slideChain,[],[FlickNote,SuperNote],false,true,2..Float::INFINITY)
     end
   end
   
   [
     [:BaseNote ,BaseNote],
     [:TapNote  ,TapNote],
+    [:SuperNote,SuperNote],
     [:FlickNote,FlickNote],
     
     [:MixNotes ,MixNotes],
