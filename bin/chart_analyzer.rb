@@ -15,13 +15,13 @@ require_relative 'chart_parser'
 class Radar
   Categories = {
     stream: ->(c){
-      60 * Rational(c[:note_count],c[:song_length]) * Rational(2,3)
+      60 * Rational(c[:note_count],c[:chart_length]) * Rational(2,3)
     },
     voltage:->(c){
       Rational(c[:natural_time] * (Math.log(c[:peak_density],3) + 3),4) * Rational(4,5)
     },
     freeze: ->(c){
-      1000 * Rational(c[:hold_length],c[:song_length]) * Rational(30,100)
+      1000 * Rational(c[:hold_length],c[:chart_length]) * Rational(30,100)
     },
     slide:  ->(c){
       60 * Rational(c[:slide_length] + Rational(
@@ -31,10 +31,10 @@ class Radar
           Rational(c[:slide_power] * 7, 4)
         ].inject(:+),
         1
-      ),c[:song_length]) * Rational(5,4)
+      ),c[:chart_length]) * Rational(5,4)
     },
     air:    ->(c){
-      60 * Rational(c[:pair_count],c[:song_length]) * Rational(4,3)
+      60 * Rational(c[:pair_count],c[:chart_length]) * Rational(4,3)
     },
     chaos:  ->(c){
       0
@@ -122,9 +122,10 @@ class ChartAnalyzer
           h.map { |ho| ho[0..-1] }.flatten.each { |nnp| np.delete(nnp) }
           
           # Stream/Air
-          radar[:note_count]  = np.size
-          radar[:pair_count]  = j.size
-          radar[:song_length] = [:max,:min].map{|m| n.map(&:time).send(m)}.reduce(:-)
+          radar[:note_count]   = np.size
+          radar[:pair_count]   = j.size
+          radar[:song_length]  = n.map(&:time).max
+          radar[:chart_length] = [:max,:min].map{|m| n.map(&:time).send(m)}.reduce(:-)
           
           # Freeze
           radar[:hold_length] = 0.0
