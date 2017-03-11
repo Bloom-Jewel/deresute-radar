@@ -78,7 +78,7 @@ class ChartTimeChecker
                      "[#{(0...cary.size).map { |x| (cptr == x) ? ("\x1b[31;1m%s\x1b[m" % iptr[x]) : iptr[x] } * ', '}]",
                      "[#{(0...cary.size).map { |x| (cptr == x) ? ("\x1b[33;1m%s\x1b[m" % optr[x]) : optr[x] } * ', '}]",
                      "[#{(0...cary.size).map { |x| (cptr == x) ? ("\x1b[32;1m%s\x1b[m" % tinv[x]) : tinv[x] } * ', '}]",
-                   ] * ' ' if false
+                   ] * ' ' if true
             end unless cfin[cptr]
           ensure
             cfin[cptr] = (tptr[cptr] >= tmax) || (iptr[cptr].succ >= cary[cptr].size)
@@ -97,6 +97,7 @@ class ChartTimeChecker
           iptr[cptr] = [iptr[cptr].succ, cary[cptr].size].min
         end
       end
+      p iaru
       
       iaru.each do |note_time, interval_sets|
         index_power = [85,100,110,105,95]
@@ -144,7 +145,7 @@ class ChartTimeChecker
                      p [zt,ct,zt.to_f,ct.to_f]
                      zt = ct
                    end
-                 end until zt.denominator <= 2
+                 end
                  if zt >= 150 then
                    zt /= 2 while Rational(60,zt) < CALIBRATOR_LIMIT[:lower]
                  else

@@ -7,6 +7,7 @@
 require_relative 'raw_json'
 require_relative 'rhythm'
 require_relative 'kernel_snippet'
+require_relative 'typed_array'
 
 # INCLUSION LINE STARTS HERE
 module Deresute
@@ -50,11 +51,12 @@ module Deresute
           # Third iteration - define slides
           chart_data.select { |note_data| note_data[:groupId].nonzero? }
             .group_by { |note_data| note_data[:groupId] }
+            .tap { |slide_set| next; ::Kernel.p slide_set.map{|k,v|[k,v.size]} }
             .each do |group_id,note_list|
               begin
                 m[:s][group_id] = define_slide(*note_list.map{|note|note[:id]})
-              rescue TypeError
-                ::STDERR.puts "Bad slide chain detected: #{note_list.map(&:inspect) * ', '}"
+              rescue TypeError, RangeError
+                ::STDERR.puts "Bad slide chain detected: #{note_list.map(&:inspect) * ', '} (#{$!.class}: #{$!.message})"
               end
             end
           
@@ -63,7 +65,7 @@ module Deresute
             .group_by { |note_data| note_data[:sec] }
             .each do |pair_time,pair_note|
               if pair_note.size != 2 then
-                ::STDERR.puts "Bad pair setup detected"
+                ::STDERR.puts "Bad pair setup detected (#{pair_note.size})"
               else
                 m[:p] << define_pair(*pair_note.map{|note|note[:id]})
               end
@@ -393,176 +395,9 @@ module Deresute
     end
   end
   
-  class MixNotes
-    "Represents a combination of notes.
-    
-    It's start time and end time determined by notes that
-    composes this class itself.
-    "
-    
-    # constructor
-    def initialize(initData=[],baseClass=[],direClass=[],indexLock=false,strict=false,limit=2)
-      # Direct Array Checker
-      [
-        ["initializing",initData,BasicObject],
-        ["sub-class",baseClass,Class],
-        ["direct-class",direClass,Class]
-      ].each { |item|
-        fail TypeError, "Expecting #{item[0]} array but given #{item[1].class}" unless item[1].instance_of?(Array)
-        item[1].each_with_index { |itemData,itemId|
-          fail TypeError, "Expecting #{item[0]} items of #{item[2]} but given #{itemData.class} on index #{itemId.class}" unless itemData.is_a?(item[2])
-        }
-      }
-      
-      fail ArgumentError, "Cannot specify total-immutable of MixNotes" if [baseClass,direClass].all? { |ary| ary.empty? }
-      
-      @arraySCls  = baseClass.dup.freeze
-      @arrayDCls  = direClass.dup.freeze
-      @setOfItem = initData.dup.freeze
-      @indexLock  = !!indexLock
-      @arrayLimit = 0..Float::INFINITY
-      
-      self[].each { |item,idx| type_checker item,idx }
-      @array_limit = limit if [Integer,Array,Range].any? { |cls| cls === limit }
-      @strict = !!strict
-      
-      limit_checker(@setOfItem.size)
-    end
-    
-    # accessors
-    public
-    def [](*keys)
-      case keys.length
-      when 0
-        @setOfItem.each_with_index
-      else
-        @setOfItem.values_at(*keys)
-      end
-    end
-    def []=(key,value)
-      fail TypeError, sprintf("Expected Integer key given %s",
-        key.class) unless key.is_a?(Integer)
-      
-      allowedRange = Range.new(*([@setOfItem.size,~@setOfItem.size].sort));
-      fail RangeError, sprintf("Index given out of bound, given %d expected %s",
-        key,allowedRange) if allowedRange.include?(key)
-      typeChecker(value,key)
-      @setOfItem[key]=value
-    end
-    def start
-      @setOfItem.first
-    end
-    def end
-      @setOfItem.last
-    end
-    
-    # private methods
-    private
-    def type_checker(item,idx)
-      if @indexLock then
-        # Perform looping index-based type checker
-        baseClass = @arraySCls[idx % @arraySCls.size] rescue nil
-        direClass = @arrayDCls[idx % @arrayDCls.size] rescue nil
-        unless (item.is_a?(baseClass) rescue false) ||
-          (item.instance_of?(direClass) rescue false) then
-          
-          fail TypeError, sprintf("Expected %s, but given %s instead",[
-            baseClass.nil? ? '' :
-              sprintf("%s and it's descendant",baseClass),
-            direClass.nil? ? '' :
-              sprintf("%s itself",direClass),
-          ].select{|str| !str.empty? }.join(' or '),item.class)
-        end
-      else
-        # Perform non-index class based type-checker
-        unless @arraySCls.any? { |cls| item.is_a?(cls) } ||
-          @arrayDCls.any? { |cls| item.instance_of?(cls) } then
-          
-          fail TypeError, sprintf("Expected %s, but given %s instead",[
-            @arraySCls.empty? ? '' :
-              sprintf("any class based off %s",@arraySCls.join(',')),
-            @arrayDCls.empty? ? '' :
-              sprintf("direct-class of %s",@arrayDCls.join(','))
-          ].select{|str| !str.empty? }.join(' or '), item.class)
-        end
-      end
-    end
-    def limit_checker(newVal)
-      min,max = 0,0
-      case @arrayLimit
-      when Range
-        min,max = @arrayLimit.begin,@arrayLimit.end
-      when Numeric
-        min,max = [@arrayLimit.floor()] * 2
-      when Array
-        min,max = @arrayLimit.min(),@arrayLimit.max()
-      end
-      
-      ret = newVal.between?(min,max)
-      fail RangeError, sprintf("Composition change failed, strict mode is set for %d of %.0f..%.0f",
-        newVal,min,max) if @strict && !ret
-      ret
-    end
-    def master_array_insert(meth,items,typeCheck=false,retCount=true)
-      succ = 0
-      elmt = []
-      
-      items.each { |item|
-        next unless limit_checker(@setOfItem.length+1)
-        type_checker(item,@setOfItem.length+1) if typeCheck
-        
-        @setOfItem.method(meth).call(item)
-        elmt.push(item)
-        succ += 1
-      }
-      @setOfNote.sort!
-      
-      retCount ? succ : elmt
-    end
-    def master_array_remove(meth,count)
-      elmt = []
-      empty = @setOfItem.empty?
-      count.times {
-        next unless limit_checker(@setOfItem.length-1)
-        elmt.push(@setOfItem.method(meth).call())
-      }
-      @setOfNote.sort!
-      
-      empty ? nil : (elmt.length > 1 ? elmt : elmt.pop())
-    end
-    
-    # protected methods
-    protected
-    
-    # public methods
-    public
-    def push(*items);master_array_insert(__method__,items,true,true);end
-    def unshift(*items);master_array_insert(__method__,items,true,true);end
-    def pop(count=1);master_array_remove(__method__,count);end
-    def shift(count=1);master_array_remove(__method__,count);end
-    
-    def to_s
-      "#<%s:%#016x notes:%s>" % [
-        self.class,
-        self.__id__,
-        @setOfItem
-      ]
-    end
-    alias :inspect :to_s
-    
-    # class methods
-    class << self
-      # private static methods
-      private
-      
-      # protected static methods
-      protected
-      
-      # public static methods
-      public
-      
-    end
+  class MixNotes < TypedArray
   end
+  
   class PairNotes < MixNotes
     "Representing a pair of notes
     
@@ -571,9 +406,7 @@ module Deresute
     "
     
     # constructor
-    def initialize(sideLft,sideRgt)
-      super([sideLft,sideRgt],[BaseNote],[],false,true,2)
-    end
+    build base_class: [BaseNote], index_strict: true, size: 2
   end
   class HoldNote < MixNotes
     "Representing a pair of notes
@@ -583,9 +416,7 @@ module Deresute
     "
     
     # constructor
-    def initialize(sideHed,sideTel)
-      super([sideHed,sideTel],[TapNote,BaseNote],[],true,true,2)
-    end
+    build base_class: [TapNote, BaseNote], index_strict: true, size: 2
   end
   class SlidePath < MixNotes
     "Representing a chain of flick notes
@@ -595,16 +426,35 @@ module Deresute
     " 
     
     # constructor
-    def initialize(*slideChain)
-      super(slideChain,[],[FlickNote,SuperNote],false,true,2..Float::INFINITY)
+    build base_class: [FlickNote,SuperNote], index_strict: false, size: 2..Float::INFINITY
+    
+    # removes any trailing flicks unless end of SuperHold chains.
+    def have_slide?
+      @data.first.is_a? SuperNote
+    end
+    alias :have_shold? :have_slide?
+    
+    def truncate
+      return nil if !have_slide?
+      
+      s = self.dup
+      s.truncate!
+    end
+    def truncate!
+      return nil if !have_slide?
+      slide_set = @data.select { |x| x.is_a? SuperNote }
+      end_note  = @data[slide_set.size]
+      pop_size  = self.length - (slide_set.size + (end_note.nil? ? 0 : 1))
+      self.pop(pop_size) if pop_size > 0
+      self
     end
   end
   
   [
     [:BaseNote ,BaseNote],
     [:TapNote  ,TapNote],
-    [:SuperNote,SuperNote],
     [:FlickNote,FlickNote],
+    [:SuperNote,SuperNote],
     
     [:MixNotes ,MixNotes],
     [:PairNote ,PairNotes],
@@ -622,5 +472,5 @@ end
 if __FILE__ == $0 then
   puts("Loaded main module.")
 else
-  puts("Included #{__FILE__} module")
+  #puts("Included #{__FILE__} module")
 end

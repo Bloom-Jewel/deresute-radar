@@ -129,12 +129,16 @@ class ChartAnalyzer
           
           # Freeze
           radar[:hold_length] = 0.0
-          h.map { |ho| [ho.start.time,(ho.end.time - ho.start.time).round(6)] }
-            .group_by { |(start_time,hold_duration)| start_time }
-            .map { |start_time,timeset| [start_time,timeset.map(&:last).max] }
-            .tap { |holds|
-            radar[:hold_length] = holds.map(&:last).inject(:+)
-          }
+          -> {
+            hp = proc { |ho| [ho.start.time,(ho.end.time - ho.start.time).round(6)] }
+            hs = h.map(&hp)
+            hs += s.map(&:truncate).compact.map(&hp)
+            hs.group_by { |(start_time,hold_duration)| start_time }
+              .map { |start_time,timeset| [start_time,timeset.map(&:last).max] }
+              .tap { |holds|
+              radar[:hold_length] = holds.map(&:last).inject(:+)
+            }
+          }.call
           radar[:hold_count]  = h.size
           
           # Slide
@@ -157,16 +161,6 @@ class ChartAnalyzer
                 case flick
                 when SuperNote
                   radar[:shold_count] += 1
-                  case memo[1]
-                  when SuperNote
-                    radar[:hold_length] += flick.time - memo[1].time
-                    if memo[0] != flick.pos
-                      memo[0] = flick.pos
-                      memo[-1]+= 1
-                    end
-                  else
-                    memo[0] = flick.pos
-                  end
                 when FlickNote
                   case memo[1]
                   when FlickNote
@@ -189,8 +183,8 @@ class ChartAnalyzer
             ].max
             radar[:slide_length] += slide.end.time - slide.start.time
             slide_chain_power  = [radar[:flick_count] + radar[:slide_kicks] - 5,0].max * 0.025
-            slide_length_power = (1 + radar[:slide_length]) ** 0.8
-            radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.9
+            slide_length_power = (1 + radar[:slide_length]) ** 0.75
+            radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.85
           }
           radar[:slide_count] = s.size
           radar[:flick_count] += sp.size
@@ -226,7 +220,7 @@ class ChartAnalyzer
           
           # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
           # puts "%s_%s voltage:%7.3f common:%7.3f average:%7.3f natural:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:common_time],radar[:average_time],radar[:natural_time],radar[:peak_density]]
-          # puts "%s_%s slide:%7.3f count:%3d kicks:%3d power:%7.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:slide_kicks],radar[:slide_power]]
+          # puts "%s_%s slide:%9.3f count:%3d/%3d kicks:%3d power:%9.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:shold_count],radar[:slide_kicks],radar[:slide_power]]
         end
       end
     end

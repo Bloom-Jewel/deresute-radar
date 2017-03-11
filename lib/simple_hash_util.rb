@@ -5,11 +5,11 @@
 =end
 
 require_relative 'kernel_snippet'
+require_relative 'method_redefine'
 
 class Object
-  alias :shu_oldHash :hash
-  def hash
-    hsh = shu_oldHash
+  redefine :hash do |shu_old_hash|
+    hsh = shu_old_hash.call
     if self.instance_variables.empty? then
     else
       self.instance_variables.each { |vk|
