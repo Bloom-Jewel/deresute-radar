@@ -117,12 +117,12 @@ class TypedArray
       end
       
       define_method :initialize do |*data|
+        @data = []
         begin
-          @data = data
-          type_checker.call  @data
-          limit_checker.call @data
+          type_checker.call  data
+          limit_checker.call data
+          @data.concat data
         rescue Exception => e
-          @data = []
           if $DEBUG then
             $stderr.puts "initializing empty array, #{e.class}: #{e.message}"
           else

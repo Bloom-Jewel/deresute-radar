@@ -21,7 +21,7 @@ class ChartParser
               else
                 Dir['charts/???_?.json'].sort
               end
-    p @charts.first(10)
+    #p @charts.first(10)
   end
   def parse_charts
     @charts.map { |fn|

@@ -110,7 +110,7 @@ class ChartAnalyzer
     @charts.each do |song_id,charts|
       charts.each_with_index do |chart,diff_id|
         loop_count += 1
-        GC.start if (loop_count % 20).zero?
+        GC.start if (loop_count % 3).zero?
         @radars[song_id][diff_id].tap do |radar|
           n = chart.notes.values
           h = chart.holds.values
@@ -168,9 +168,6 @@ class ChartAnalyzer
                       memo[0] = flick.dir
                       memo[-1]+= 1
                     end
-                  when SuperNote
-                    radar[:hold_length] += flick.time - memo[1].time
-                    memo[0] = flick.dir
                   else
                     memo[0] = flick.dir
                   end
@@ -183,8 +180,8 @@ class ChartAnalyzer
             ].max
             radar[:slide_length] += slide.end.time - slide.start.time
             slide_chain_power  = [radar[:flick_count] + radar[:slide_kicks] - 5,0].max * 0.025
-            slide_length_power = (1 + radar[:slide_length]) ** 0.75
-            radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.85
+            slide_length_power = (1 + radar[:slide_length]) ** 0.80
+            radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.90
           }
           radar[:slide_count] = s.size
           radar[:flick_count] += sp.size
