@@ -13,7 +13,7 @@ require_relative 'chart_parser'
 
 class ChartTimeChecker
   include FinalClass
-  CALIBRATOR_LIMIT = {upper: Rational(30,40), lower: Rational(24,99)}
+  CALIBRATOR_LIMIT = {upper: Rational(30,40), lower: Rational(28.5,99)}
   def initialize(*argv)
     @parser = ChartParser.new(*argv)
     @chart_group = @parser.parse_charts
@@ -37,129 +37,71 @@ class ChartTimeChecker
     @chart_group.each do |song_id, charts|
       setup = {}
       # Get only Tap Note that have unique time.
-      cary = charts.map(&:notes).map(&:values).map{ |chart_notes| chart_notes.select { |note| note.is_a? TapNote }.uniq { |note| note.time } }
+      zary = charts.map(&:notes).map(&:values)
+      cary = zary.map{ |chart_notes| chart_notes.select{|x| TapNote === x }.uniq(&:time).map(&:time) }
+      nary = zary.map{ |chart_notes| chart_notes.uniq(&:time).map(&:time) }
       # Index Pointer
-      iptr = [0] * cary.size
-      # Chart Finish Flag
-      cfin = [false] * cary.size
-      # Old Pointer
-      optr = [0.0] * cary.size
-      # Time Pointer
-      tptr = [0.0] * cary.size
-      # Time Interval
-      tinv = [0.0] * cary.size
-      iaru = {}
       tset = {}
+      ctim = Array.new(cary.size) { Hash.new }
+      titr = 0
       
-      # Gather Timing Differences
-      cary[0].size.times do |cue|
-        next if iptr[0] > cue
-        if cue == 0 then
-          notes_time = cary.map(&:first).map(&:time)
-          setup.store :start_time,notes_time.max
-          tptr.fill { |cptr| notes_time[cptr] }
-        end
-        
-        ifoc = Array.new(cary.size) { [] }
-        tcue = tptr.max
-        
+      # Find first offset
+      -> {
+        notes_time = cary.map(&:first)
+        actual_time = nary.map(&:first)
+        time_shift = 0
+        tdiv = [1] * notes_time.size
         begin
-          cptr = 0
-          tmax = tptr.max
-          cfin.fill { |i| iptr[i].succ >= cary[i].size }
-          begin
-            begin
-              optr[cptr], tptr[cptr] = tptr[cptr], cary[cptr][iptr[cptr]].time
-              if calibrate.call(tptr[cptr] - optr[cptr]).abs > 1e-6 then
-                tinv[cptr] = (calibrate.call(tptr[cptr] - optr[cptr])).round(6)
-                ifoc[cptr] << tinv[cptr]
-              end
-              puts [
-                     "[#{(0...cary.size).map { |x| (cptr == x) ? ("\x1b[31;1m%s\x1b[m" % iptr[x]) : iptr[x] } * ', '}]",
-                     "[#{(0...cary.size).map { |x| (cptr == x) ? ("\x1b[33;1m%s\x1b[m" % optr[x]) : optr[x] } * ', '}]",
-                     "[#{(0...cary.size).map { |x| (cptr == x) ? ("\x1b[32;1m%s\x1b[m" % tinv[x]) : tinv[x] } * ', '}]",
-                   ] * ' ' if true
-            end unless cfin[cptr]
-          ensure
-            cfin[cptr] = (tptr[cptr] >= tmax) || (iptr[cptr].succ >= cary[cptr].size)
-            unless cfin[cptr] then
-              iptr[cptr] += 1
-            end
-            cptr = (cptr + 1) % charts.size
-          end until cfin.all? { |finish| finish }
-        end while (0...cary.size).to_a
-          .select { |cptr| iptr[cptr].succ < cary[cptr].size }
-          .map { |cptr| tptr[cptr] }
-          .uniq.size > 1
-        
-        iaru.store tcue,ifoc
-        (0...(charts.size)).each do |cptr|
-          iptr[cptr] = [iptr[cptr].succ, cary[cptr].size].min
-        end
-      end
-      p iaru
-      
-      iaru.each do |note_time, interval_sets|
-        index_power = [85,100,110,105,95]
-        interval_sets.each_with_index.map { |interval_set,interval_index|
-          interval_set.group_by { |x| x.round(5) }
-            .map { |k,v| [v.inject(:+).fdiv(v.size).round(6),v.size * index_power[interval_index] / 100] }.to_h
-        }.inject { |ch,nh|
-          nh.keys.each do |nk|
-            ch[nk] ||= 0
-            ch[nk]  += 1
+          tnotes = notes_time.each_with_index.map{|x,i|Rational(x,tdiv[i]).round(6)}
+          # p tnotes.map(&:to_f)
+          tlow  = tnotes.min
+          thigh = tnotes.max
+          tbpm  = bpmize.call(calibrate.call(tlow)).round(2)
+          # puts "stop? @#{titr} #{tnotes.map(&:to_f)} #{tbpm.to_f}" if tnotes.all? {|tnow| (tnow - tlow).abs < 1e-6 }
+          break if tnotes.all? {|tnow| (tnow - tlow).abs < 1e-6 } if tbpm.denominator <= 1
+          
+          notes_time.size.times do |cptr|
+            tnow = tnotes[cptr]
+            tdiv[cptr] += Rational(1,1) if tnow == thigh
           end
-          ch
-        }.group_by { |k,v| "%.4f" % k }
-         .map { |_,d| d=d.to_h; [d.keys.inject(:+).fdiv(d.keys.size).round(6),d.values.inject(:+)] }.to_h
-         .tap { |interval_group|
-           ik = interval_group.keys
-           tt = (Rational(60,ik.map { |ck|
-             [
-               ck,
-               (ik - [ck]).map { |nk| Rational(ck,nk).rationalize(Rational(1,100000)) }
-                 .select { |int| /^1{1,2}0*$/.match(int.denominator.to_s(2)) }
-             ]
-           }.select { |(ck,ib)|
-             ib.all? { |x| x <= 1 }
-           }.first.first).rationalize(1e-1)) rescue nil
-           
-           if !tt.nil? && (tset.size.zero? || (tset.values.last - tt).abs > 1e-6) then
-             if tset.size.nonzero? then
-               rt = Rational(tset.values.last,tt)
-               rt = Rational(1,rt) if rt < 1
-               rt = rt.rationalize(1e-6)
-               
-               next if rt.denominator <= dcheck
-               p [tset.values.last,tt,rt,rt.denominator,tt.denominator]
-             end
-             if tt.denominator.between?(2,dcheck) then
-               [
-                 tt,
-                 Rational(tt * tt.denominator,tt.denominator + 1),
-                 Rational(tt * (tt.denominator + 1),tt.denominator)
-               ].min { |xt| xt.denominator }.tap { |xt|
-                 zt = xt
-                 begin
-                   Rational(zt * (zt.denominator),zt.denominator.pred).tap do |ct|
-                     p [zt,ct,zt.to_f,ct.to_f]
-                     zt = ct
-                   end
-                 end
-                 if zt >= 150 then
-                   zt /= 2 while Rational(60,zt) < CALIBRATOR_LIMIT[:lower]
-                 else
-                   zt *= 2 while Rational(60,zt) > CALIBRATOR_LIMIT[:upper]
-                 end
-                 tt = zt
-               }
-             end
-             
-             tset.store note_time, tt
-           end
-         }
-      end
-      puts "#{song_id} #{tset.map{|k,v|[k,v.to_f]}.to_h}"
+        ensure
+          titr += 1
+        end until titr >= 100000
+        time_shift += 4 while actual_time.min < actual_time.max - time_shift * bpmize.call(tbpm)
+        time_offset = actual_time.max - time_shift * bpmize.call(tbpm)
+        # puts "#{song_id} BPM: #{"%7.3f" % tbpm} @#{"%.3f" % time_offset.round(3)}s (#{titr})"
+        setup.store :start_time, time_offset
+        tset.store Rational(0), tbpm
+      }.call
+      next if song_id.to_i < 73
+      # Snap timings
+      -> {
+        toff = setup[:start_time]
+        tbpm = tset[Rational(0)]
+        tadd = Rational(0)
+        tensure = -> (tary) { tary.take_while{|(ntime,time)| !/^[1]{1,2}[0]*$/.match(time.denominator.to_s(2)).nil? } }
+        begin
+          nary.each{|note_times| note_times.map!{|ntime| [ntime,Rational(ntime - toff,Rational(60,tbpm)).rationalize(1e-3) + tadd] }}
+          tchange = false
+          nary.each_with_index { |tary,diff|
+            mary = tensure.call(tary)
+            tchange ||= tary.size != mary.size
+            ctim[diff].update tary.shift(mary.size-1).to_h
+            ctim[diff].update tary.first(1).to_h
+          }
+          next if !tchange
+          
+          -> {
+            debut_ticks = 4
+            farthest_time = nary.first.first(debut_ticks.succ).last.first
+            iptr = [0] * cary.size
+            tinv = Array.new(cary.size) { [] }
+            
+          }.call
+          break
+        end while tchange
+      }.call
+      break
     end
   end
   def self.main(*argv)
