@@ -10,46 +10,43 @@ require_relative '../lib/framework'
 require_relative '../lib/final_class'
 require_relative '../lib/deremod'
 
-class ChartParser
+module ChartAnalyzer;end
+
+class ChartAnalyzer::Parser
   include FinalClass
-  def initialize(*argv)
-    @charts = if $DEBUG then
-                [
-                  "510_1.json","515_2.json","504_2.json","509_3.json","520_3.json","518_3.json",
-                  "502_4.json","508_4.json","516_4.json","511_4.json","523_4.json","519_4.json"
-                ].map { |x| "charts/#{x}" }
-              else
-                Dir['charts/???_?.json'].sort
-              end
-    #p @charts.first(10)
+  def initialize(song_id:,diff_id:)
+    @chart_name = "%03d_%1d" % [
+      [[(Integer(song_id,10) rescue 0),999].min,0].max,
+      [[(Integer(diff_id,10) rescue 0),  9].min,0].max
+    ]
   end
-  def parse_charts
-    @charts.map { |fn|
-      cc = nil
-      d = /(\d+)_(\d)/.match(fn)
-      ffn = "analyzer/#{d[0]}.chartcache"
-      cvd = false
-      begin
-        cc = Marshal.load(File.read(ffn))
-      rescue
-        # error
-        File.unlink(ffn)
-      else
-        cvd = Digest::SHA256.file(fn).hexdigest == cc.checksum
-      end if File.file?(ffn)
-      unless cvd
-        c = ImportedChart.load(fn)
-        # puts "#{fn} #{c[:chartData].class}"
-        cc = c.build(
-          difficulty:d[1].to_i,
-          hash:Digest::SHA256.file(fn).hexdigest
-        )
-        File.write(ffn,Marshal.dump(cc))
-      end
-      [d[1],cc]
-    }.group_by { |(stype,chart)| stype }
-     .map { |stype,chart| [stype,chart.map(&:last)] }
-     .to_h
+  def parse
+    return @chart_cache if @chart_cache
+    
+    fn = "charts/%s.json" % @chart_name
+    cc = nil
+    d = /(\d+)_(\d)/.match(fn)
+    ffn = "analyzer/#{d[0]}.chartcache"
+    cvd = false
+    begin
+      cc = Marshal.load(File.read(ffn))
+    rescue
+      # error
+      File.unlink(ffn)
+    else
+      cvd = Digest::SHA256.file(fn).hexdigest == cc.checksum
+    end if File.file?(ffn)
+    unless cvd
+      c = ImportedChart.load(fn)
+      # puts "#{fn} #{c[:chartData].class}"
+      cc = c.build(
+        difficulty:d[1].to_i,
+        hash:Digest::SHA256.file(fn).hexdigest
+      )
+      File.write(ffn,Marshal.dump(cc))
+    end
+    @chart_cache = cc
+    @chart_cache
   end
   def method_missing(m,*a,&b)
     if instance_variable_defined?("@#{m}") then
@@ -60,10 +57,8 @@ class ChartParser
     end
   end
   def self.main(*argv)
-    new(*argv).instance_exec {
-      parse_charts
-    }
+    new(song_id:argv.shift, diff_id:argv.shift).instance_exec { parse }
   end if is_main_file
 end
 
-def main(*argv); ChartParser.main(*argv); end if is_main_file
+def main(*argv); ChartAnalyzer::Parser.main(*argv); end if is_main_file
