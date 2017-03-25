@@ -17,9 +17,9 @@ class Radar
     slide:  ->(c){
       60 * Rational(c[:slide_length] + Rational(
         [
-          Rational(c[:flick_count] * 1,10),
+          Rational(c[:flick_count] * 1,12),
           Rational(c[:slide_kicks] * 1, 2),
-          Rational(c[:slide_power] * 7, 4)
+          Rational(c[:slide_power] * 6, 4)
         ].inject(:+),
         1
       ),c[:chart_length]) * Rational(5,4)
@@ -72,7 +72,7 @@ class Radar
   end
 end
 
-class ChartAnalyzer::Analyzer
+module ChartAnalyzer; class Analyzer
   include FinalClass
   def initialize(song_id:,diff_id:)
     @song_id, @diff_id = [
@@ -198,7 +198,7 @@ class ChartAnalyzer::Analyzer
         :flick_count, :slide_count, :shold_count,
         :combo_count, :song_length
       ))
-      res.push Integer(key,10),@diff_id
+      res.push @song_id,@diff_id
       db.execute(
         "UPDATE deresute_charts " +
         "SET " + 
@@ -224,7 +224,7 @@ class ChartAnalyzer::Analyzer
   def self.main(*argv)
     new(song_id: argv.shift, diff_id: argv.shift).instance_exec { analyze; update }
   end if is_main_file
-end
+end; end
 
-def main(*argv); ChartAnalyzer.main(*argv); end if is_main_file
+def main(*argv); ChartAnalyzer::Analyzer.main(*argv); end if is_main_file
 

@@ -16,8 +16,8 @@ class ChartAnalyzer::Parser
   include FinalClass
   def initialize(song_id:,diff_id:)
     @chart_name = "%03d_%1d" % [
-      [[(Integer(song_id,10) rescue 0),999].min,0].max,
-      [[(Integer(diff_id,10) rescue 0),  9].min,0].max
+      [[(Integer(song_id.to_s,10) rescue 0),999].min,0].max,
+      [[(Integer(diff_id.to_s,10) rescue 0),  9].min,0].max
     ]
   end
   def parse
