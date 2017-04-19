@@ -12,9 +12,10 @@ module ChartAnalyzer;class AutoBPM
   MAX_RANGE = 0..Float::INFINITY
   CALIBRATION_STEP = Rational(1,2)
   
+  attr_reader :setup, :timing_set, :mapped_time
   
   def initialize(song_id:)
-    @song_id     = [[(Integer(song_id,10) rescue 0),1].max,999].min
+    @song_id     = [[(Integer(String(song_id),10) rescue 0),1].max,999].min
     @parser      = BatchParser.new(song_id: song_id)
     @charts      = @parser.parse
     
@@ -52,17 +53,39 @@ module ChartAnalyzer;class AutoBPM
   
   def load_fixed_timing
     return unless Dir.exists?('chart.timing')
+    setup_file = ->(fn) {
+      next unless File.exists?(fn)
+      
+      JSON.load(File.read(fn)).tap do |json|
+        if json.key?(:config) then
+          @fixed_conf[:setup] = json.delete(:config).map{ |k,v| [k.to_sym,v] }.to_h
+        end
+        
+        if json.key?(:timing) then
+          @fixed_conf[:timing_set] = json.delete(:timing).map{ |k,v| [Rational(k),Rational(*v).rationalize(1e-3)] }.to_h
+        end
+        
+        if json.key?(:mapped) then
+          @fixed_conf[:mapped_time] = json.delete(:mapped).map{ |k,v| [Float(String(k)),Rational(*v)] }.to_h
+        end
+      end
+      
+      @fixed_conf.each do |key, data|
+        instance_variable_get("@#{key}").replace(data)
+      end
+    }
+    
     fn = File.join('chart.timing',"%03d.revised.json" % @song_id)
-    return unless File.exists?(fn)
-    JSON.load(File.read(fn)).tap do |json|
-      @fixed_conf[:setup] = json.delete(:config).map{|k,v| [k.to_sym,v] }.to_h
-      @fixed_conf[:timing_set] = json.delete(:timing).map{|k,v| [Float(k),Rational(*v).rationalize(1e-3)] }.to_h
+    if File.exists?(fn) then
+      setup_file.call(fn)
     end
     
-    @fixed_conf.each do |key, data|
-      instance_variable_get("@#{key}").replace(data)
+    fn = File.join('chart.timing',"%03d.json" % @song_id)
+    if @fixed_conf.empty? && File.exists?(fn) && Time.now <= File.mtime(fn) + 3 * 86400 then
+      setup_file.call(fn)
     end
-    true
+    
+    !@fixed_conf.empty?
   end
   
   def get_first_timing
@@ -362,15 +385,34 @@ module ChartAnalyzer;class AutoBPM
       detect_timing
     end
     
-    snap_timing
-    store_timing
+    if !@fixed_conf.key?(:mapped_time) then
+      snap_timing
+      store_timing
+    end
   end
   
   alias :inspect :to_s
+  
+  class << self
+    def main(*argv)
+      new(song_id: argv.shift).instance_exec { get_bpm }
+    end if is_main_file
     
-  def self.main(*argv)
-    new(song_id: argv.shift).instance_exec { get_bpm }
-  end if is_main_file
+    -> {
+      old_new = instance_method(:new)
+      cache = {}
+      define_method :new do |*argv|
+        sid = String(argv.first[:song_id])[0,3].rjust(3,'0')
+        if cache.key?(sid) then
+          cache.fetch(sid)
+        else
+          data = old_new.bind(self).call(*argv)
+          cache.store(sid,data)
+          data
+        end
+      end
+    }.call
+  end
 end;end
 
 def main(*argv); ChartAnalyzer::AutoBPM.main(*argv); end if is_main_file

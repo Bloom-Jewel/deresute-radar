@@ -6,7 +6,7 @@ module ChartAnalyzer
   class BatchParser
     include FinalClass
     def initialize(song_id:)
-      @parsers = Dir[("charts/%s_?.json" % song_id[0,3].gsub(%r{\D},'?').rjust(3,'0'))].sort.map do |chart_name|
+      @parsers = Dir[("charts/%s_?.json" % String(song_id)[0,3].gsub(%r{\D},'?').rjust(3,'0'))].sort.map do |chart_name|
         lid,did = /(\d{3})_(\d)/.match(chart_name).values_at(1,2)
         Parser.new(song_id: lid, diff_id: did)
       end
@@ -22,9 +22,25 @@ module ChartAnalyzer
         super(m,*a,&b)
       end
     end
-    def self.main(*argv)
-      new(song_id:argv.shift).instance_exec { parse_charts }
-    end if is_main_file
+    class << self
+      def main(*argv)
+        new(song_id:argv.shift).instance_exec { parse_charts }
+      end if is_main_file
+      -> {
+        old_new = instance_method(:new)
+        cache   = {}
+        define_method :new do |*argv|
+          sid = String(argv.first[:song_id])[0,3].rjust(3,'0')
+          if cache.key?(sid) then
+            cache.fetch(sid)
+          else
+            data = old_new.bind(self).call(*argv) 
+            cache.store(sid,data)
+            data
+          end
+        end
+      }.call
+    end
   end
 end
 

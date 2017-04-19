@@ -56,9 +56,30 @@ class ChartAnalyzer::Parser
       super(m,*a,&b)
     end
   end
-  def self.main(*argv)
-    new(song_id:argv.shift, diff_id:argv.shift).instance_exec { parse }
-  end if is_main_file
+  class << self
+    def main(*argv)
+      o = argv.dup
+      new(song_id:argv.shift, diff_id:argv.shift).instance_exec { parse }
+      argv.replace o
+      new(song_id:argv.shift, diff_id:argv.shift).instance_exec { parse }
+    end if is_main_file
+    -> {
+      old_new = instance_method(:new)
+      cache   = {}
+      define_method :new do |*argv|
+        sid = String(argv.first[:song_id])[0,3].rjust(3,'0')
+        did = String(argv.first[:diff_id])[0,1].rjust(1,'0')
+        cid = "#{sid}#{did}"
+        if cache.key?(cid) then
+          cache.fetch(cid)
+        else
+          data = old_new.bind(self).call(*argv)
+          cache.store(cid,data)
+          data
+        end
+      end
+    }.call
+  end
 end
 
 def main(*argv); ChartAnalyzer::Parser.main(*argv); end if is_main_file

@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require_relative 'chart_parser'
-# require_relative 'chart_bpm'
+require_relative 'chart_bpm'
 
 class Radar
   Categories = {
@@ -9,7 +9,7 @@ class Radar
       60 * Rational(c[:note_count],c[:chart_length]) * Rational(2,3)
     },
     voltage:->(c){
-      Rational(c[:natural_time] * (Math.log(c[:peak_density],3) + 3),4) * Rational(4,5)
+      Rational(c[:peak_density] * c[:average_time],4) * Rational(4,5)
     },
     freeze: ->(c){
       1000 * Rational(c[:hold_length],c[:chart_length]) * Rational(30,100)
@@ -28,7 +28,10 @@ class Radar
       60 * Rational(c[:pair_count],c[:chart_length]) * Rational(4,3)
     },
     chaos:  ->(c){
-      0
+      tbpm = Rational(60 * c[:chaos_time],c[:song_length])
+      ird  = c[:chaos_base] * (1 + Rational(tbpm, 180))
+      ipd  = c[:chaos_pair] * (1 + Rational(tbpm, 190))
+      Rational(100 * (ird + ipd),c[:song_length])
     }
   }.freeze
   
@@ -82,12 +85,13 @@ module ChartAnalyzer; class Analyzer
 
     @parser = Parser.new(song_id: @song_id, diff_id: @diff_id)
     @chart  = @parser.parse
+    @bpm    = AutoBPM.new(song_id: @song_id)
     @radar  = Radar.new
+    
+    @bpm.get_bpm
   end
   
   def analyze
-    volt_length = 1.0
-    
     n = chart.notes.values
     h = chart.holds.values
     s = chart.slides.values
@@ -129,12 +133,14 @@ module ChartAnalyzer; class Analyzer
       # Find flick that is not slides
       sp.delete(so.first)
       
+      slide_length = 0.0
       radar[:flick_count] += so.size
       radar[:slide_kicks] += [
         so.inject([nil,nil,0]) { |memo,flick|
           case flick
           when SuperNote
             radar[:shold_count] += 1
+            slide_length += flick.time - memo[1].time if memo[1] && flick.pos != memo[1].pos
           when FlickNote
             case memo[1]
             when FlickNote
@@ -145,6 +151,7 @@ module ChartAnalyzer; class Analyzer
             else
               memo[0] = flick.dir
             end
+            slide_length += flick.time - memo[1].time if memo[1]
           end
           memo[1] = flick
           
@@ -152,38 +159,56 @@ module ChartAnalyzer; class Analyzer
         }.last - 1,
         0
       ].max
-      radar[:slide_length] += slide.end.time - slide.start.time
+      radar[:slide_length] += slide_length
       slide_chain_power  = [radar[:flick_count] + radar[:slide_kicks] - 5,0].max * 0.025
-      slide_length_power = (1 + radar[:slide_length]) ** 0.80
+      slide_length_power = (1 + slide_length) ** 0.80
       radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.90
     }
     radar[:slide_count] = s.size
     radar[:flick_count] += sp.size
     
-    # Voltage
-    n.map(&:time).sort.tap { |times|
+    n.map(&:time).sort.map{|time|@bpm.mapped_time[time]}.each_cons(2).map{|(x,y)|y-x}.tap do |times|
+      # Voltage
       zt = times.dup
       xt = []
-      ct = n.select{|x|x.is_a? TapNote}.map(&:time).uniq.sort.each_cons(2).map { |(x,y)| (y-x).round(6) }
-      radar[:common_time]  = ct.group_by{|x|x}.map{|k,v|[k,v.size]}.max{|x|x.last}.first
-      radar[:average_time] = ct.inject(:+).fdiv(ct.size)
-      [radar[:common_time],radar[:average_time]].tap { |(a,b)|
-        a,b = b,a if b < a
-        radar[:natural_time] = Rational(60,a + (b - a) * 0.3)
-      }
+      radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:song_length])
       
-      radar[:peak_density] = times.uniq.map{|time|
+      radar[:peak_density] = times.uniq.map do |time|
         xt.shift while !xt.empty? && xt.first < time
-        xt.push zt.shift while !zt.empty? && (xt.last.nil? || xt.last < time+volt_length)
+        xt.push zt.shift while !zt.empty? && (xt.last.nil? || xt.inject(:+) <= 4)
         xt.size
-      }.max
-    }
+      end.max
+    end.tap do |times|
+      # Chaos
+      radar[:chaos_base] = times.inject(Rational(0)) do |irv, chaos_type|
+        ir = 0
+        case chaos_type.denominator
+        when 1
+          ir += 0
+        when 2
+          ir += 0.5
+        when 4
+          ir += 1.0
+        else
+          ir += 1.2
+        end
+        irv + ir
+      end
+      radar[:chaos_pair] = j.inject(0) do |ipv, pair_set|
+        ip = 0
+        pn = pair_set.start,pair_set.end
+        ps = pn.size.times.map { |i| pn[i].pos + (pn[i].is_a?(FlickNote) ? (pn[i].dir <=> 1.5)*0.5 : 0) }
+        ipv + (2 ** (2 - (ps[1] - ps[0]).abs) )
+      end
+      radar[:chaos_time] = @bpm.timing_set.values.each_cons(2).inject(0){ |ibv,(bpm1,bpm2)| ibv + (bpm2 - bpm1).abs }
+    end
     
     radar[:combo_count] = n.size
     
-    # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
-    # puts "%s_%s voltage:%7.3f common:%7.3f average:%7.3f natural:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:common_time],radar[:average_time],radar[:natural_time],radar[:peak_density]]
+    puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
+    # puts "%s_%s voltage:%7.3f average:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:average_time],radar[:peak_density]]
     # puts "%s_%s slide:%9.3f count:%3d/%3d kicks:%3d power:%9.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:shold_count],radar[:slide_kicks],radar[:slide_power]]
+    puts "%s_%s chaos:%7.3f base:%7.3f pair:%7.3f time:%7.3f" % [song_id,diff_id,radar.raw_chaos,radar[:chaos_base],radar[:chaos_pair],radar[:chaos_time]]
   end
   
   def update
