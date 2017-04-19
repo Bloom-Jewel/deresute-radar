@@ -8,6 +8,7 @@
 
 # Ignore chart data
 /analyzer/
+/chart.timing
 /charts
 /charts/
 /charts.old/

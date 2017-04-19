@@ -8,7 +8,7 @@ require_relative 'batch_parser'
 module ChartAnalyzer;class AutoBPM
   include FinalClass
   
-  CALIBRATOR_LIMIT = {upper: Rational(30,20), lower: Rational(28.5,99)}
+  CALIBRATOR_LIMIT = {upper: Rational(60,80), lower: Rational(28.5,99)}
   MAX_RANGE = 0..Float::INFINITY
   CALIBRATION_STEP = Rational(1,2)
   
@@ -18,11 +18,12 @@ module ChartAnalyzer;class AutoBPM
     @parser      = BatchParser.new(song_id: song_id)
     @charts      = @parser.parse
     
+    @fixed_conf  = {}
     @setup       = {}
     @timing_set  = {}
-    @mapped_time = Array.new(size) { Hash.new }
+    @mapped_time = Hash.new
     
-    @local = Hash.new do |h,k|
+    @local = Hash.new do |h,k,*args|
       k = k.to_s.to_sym
       fail "Clashing local variable name" if methods.include? k
       
@@ -33,8 +34,6 @@ module ChartAnalyzer;class AutoBPM
       
       nil
     end
-    
-    @backtrack   = nil
   end
   
   private
@@ -51,164 +50,244 @@ module ChartAnalyzer;class AutoBPM
     Rational(60,time)
   end
   
+  def load_fixed_timing
+    return unless Dir.exists?('chart.timing')
+    fn = File.join('chart.timing',"%03d.revised.json" % @song_id)
+    return unless File.exists?(fn)
+    JSON.load(File.read(fn)).tap do |json|
+      @fixed_conf[:setup] = json.delete(:config).map{|k,v| [k.to_sym,v] }.to_h
+      @fixed_conf[:timing_set] = json.delete(:timing).map{|k,v| [Float(k),Rational(*v).rationalize(1e-3)] }.to_h
+    end
+    
+    @fixed_conf.each do |key, data|
+      instance_variable_get("@#{key}").replace(data)
+    end
+    true
+  end
+  
   def get_first_timing
-    titr = 0
+    titr  = 0
     notes_time = cary.map(&:first)
     actual_time = nary.map(&:first)
-    tdiv = [1] * notes_time.size
+    tdiv  = [1] * notes_time.size
     tpass = false
-    callcc do |cc| @backtrack = cc end
-
+    tback = true
     begin
-      unless tpass
-        tnotes = notes_time.each_with_index.map{|x,i|Rational(x,tdiv[i]).round(6)}
-        # p tnotes.map(&:to_f)
-        tlow  = tnotes.min
-        thigh = tnotes.max
-        tbpm  = bpm_invert(calibrate(tlow)).round(2)
-        # puts "stop? @#{titr} #{tnotes.map(&:to_f)} #{tbpm.to_f}" if tnotes.all? {|tnow| (tnow - tlow).abs < 5e-6 }
-        break if tnotes.all? { |tnow| (tnow - tlow).abs < 5e-6 } if tbpm.denominator <= 1
-      end
+      begin
+        unless tpass
+        tnotes = notes_time.each_with_index.map{|x,i|Rational(x,tdiv[i]).round(7)}
+          # p tnotes.map(&:to_f)
+          tlow  = tnotes.min
+          thigh = tnotes.max
+          tbpm  = bpm_invert(calibrate(tlow)).round(2)
+          # puts "stop? @#{titr} #{tnotes.map(&:to_f)} #{tbpm.to_f}" if tnotes.all? {|tnow| (tnow - tlow).abs < 5e-6 }
+          break if tnotes.all? { |tnow| (tnow - tlow).abs < 5e-6 } if tbpm.denominator <= 1
+        end
+        
+        break if titr >= 100000
+        size.times do |cptr|
+          tnow = tnotes[cptr]
+          tdiv[cptr] += CALIBRATION_STEP if tnow == thigh
+        end
+      ensure
+        titr += 1
+        tpass = false
+      end until titr >= 100000
+      tpass = true
+      tbpm = bpm_invert(calibrate(calibrate(tlow) * CALIBRATION_STEP)).round(2)
+      time_shift = 0
       
-      break (@backtrack = nil) if titr >= 100000
-      size.times do |cptr|
-        tnow = tnotes[cptr]
-        tdiv[cptr] += CALIBRATION_STEP if tnow == thigh
-      end
-    ensure
-      titr += 1
-      tpass = false
-    end until titr >= 100000
-    tpass = true
-    tbpm = bpm_invert(calibrate(calibrate(tlow) * CALIBRATION_STEP)).round(2)
-    time_shift = 0
-    
-    begin
-      time_shift += 4
-    end while actual_time.min < (time_offset = actual_time.max - time_shift * bpm_invert(tbpm))
-    time_offset = time_offset.round(6)
-    puts "#{"%03d" % @song_id} BPM: #{"%7.3f" % tbpm} @#{"%.3f" % time_offset}s (#{titr.pred})"
+      begin
+        time_shift += 4
+      end while actual_time.min < (time_offset = actual_time.max - time_shift * bpm_invert(tbpm))
+      time_offset = time_offset.round(7)
+      # puts "#{"%03d" % @song_id} BPM: #{"%7.3f" % tbpm} @#{"%.3f" % time_offset}s (#{titr.pred})"
+      
+      # Check first N time sets
+      # Get the shifted and mapped time at once
+      # If fails, redone the whole thing.
+      -> {
+        xary = cary.flatten
+        xary.uniq!
+        xary.sort!
+        xary.map! { |time| time - time_offset }
+        xary.map! { |time| [time.round(7), Rational(time,bpm_invert(tbpm)).rationalize(1e-4)] }
+        
+        tback &= xary.first(5).any?{ |(time,tmap)|
+          false ? (![1,2,3].include?(tmap.denominator)) : ( !/^11?0*$/.match(tmap.denominator.to_s(2)) )
+        }
+      }.call
+    end while tback && titr < 100000
     
     @setup.store :start_time, time_offset
     @timing_set.clear
     @timing_set.store Rational(0), tbpm
-    
   end
   
-  def snap_timing
+  def detect_timing
     csiz  = 1
-    sary  = nary # please refer nary and cary, sary is common pointer on this function
-    tptr  = [0] * sary.size    # sary pointer
-    sptr  = [0] * sary.size    # sary pointer
-    cnum  = sary.size.times
+    sary  = nary                   # please refer nary and cary, sary is common pointer on this function
+    tlist = sary.flatten.uniq.sort # Maximum time
+    tptr  = [0]                    # sary pointer, current mark
+    sptr  = [0]                    # sary pointer, success mark
+    cnum  = (true ? 1 : sary.size).times
     
-    toff  = @setup[:start_time] # Seconds offset
-    tadd  = Rational 0         # Measure offset
-    tchg  = false              # Repeat flag
-    tmax  = sary.flatten.uniq.sort # Maximum time
+    toff  = @setup[:start_time]    # Seconds offset
+    tadd  = Rational 0             # Measure offset
+    tchg  = false                  # Repeat flag
     
+    slen  = Rational 1,1       # Lookahead distance
     trat  = Rational 1,2       # Multiplication of lhit
-    lhit  = [0] * sary.size    # Movement steps
-    tline = [nil] * sary.size  # Base line
-    mlim  = 8
+    lhit  = [-1]               # Movement steps
+    tline = [nil]              # Base line
+    mlim  = 6
     dtol  = 5e-6
+    tlen  = Rational 7,4
+    tlenp = Rational 0
     
     tmat  = []
     tbpm  = 120
     
+    tlook = []
+    
+    # Mapped time
     gtime = ->(len){[(toff + bpm_invert(tbpm) * Rational(trat * len)).to_f, tadd + Rational(trat * len)]}
-    # Measure offset + (Given time - Set offset)/(Current BPM)
-    stime = ->(time){tadd + Rational(time - toff,bpm_invert(tbpm)).rationalize(0.005)}
-    # (Given measure - Measure offset) * (Current BPM) + Set offset
-    ntime = ->(time){((time - tadd) * bpm_invert(tbpm) + toff).round(6)}
-    # (Current pointer + Current Delta * Movement Size)
-    ztime = ->(iptr){tline[iptr] + lhit[iptr] * trat}
+    # TIME TO MEASURE: Measure offset + (Given time - Set offset)/(Current BPM)
+    stime = ->(time){tadd + Rational(time - toff,bpm_invert(tbpm)).rationalize(1e-3)}
+    # MEASURE TO TIME: (Given measure - Measure offset) * (Current BPM) + Set offset
+    ntime = ->(time){((time - tadd) * bpm_invert(tbpm) + toff).round(7)}
+    # CURRENT POINTER: (Current pointer + Current Delta * Movement Size)
+    ztime = ->(){tline[0] + lhit[0] * trat}
+    # LAZY SNAP MARK:
+    smark = ->(cms){!cms.numerator.zero? && [1,2].include?(cms.denominator)}
+    # QUICK SNAP TIME:
+    qsnap = ->(cftime){ ->(cctime){ Rational(cctime - cftime,bpm_invert(tbpm)).rationalize(5e-4) } }
     begin
       tbpm = @timing_set[tadd]
       # tline.concat MAX_RANGE.lazy.map { |n| [(toff + bpmize.call(tbpm) * Rational(trat * n)).to_f,tadd + Rational(trat * n)] }.take_while { |(ntime,time)| ntime <= tmax[-1] + 1e-5 }.to_a
       if tline.all?(&:nil?) then
-        tline.replace sary.map(&:first).map(&stime).map(&:floor).map(&Kernel.method(:Rational))
+        # Empty time mapping, fill with all data
+        tline.replace tlist.slice(0,1).map(&stime).map(&:floor).map(&Kernel.method(:Rational))
         tchg = true
-        next
-      end
-      
-      tchg = false
-      puts "%03d %+6.3f(+%s) %6.2fbpm" % [@song_id, toff,tadd,tbpm]
-      
-      # Detect BPM
-      cjmp = nil
-      begin
-        callcc do |cc| cjmp = cc end
+      else
+        # Available time mapping
+        tchg = false
+        # puts "%03d %+8.3f(%+4d/%d) %6.2fbpm" % [@song_id, toff,tadd.numerator,tadd.denominator,tbpm]
+        
+        # Detect BPM
         cptr = 0
         begin
-          lpass = false
-          if lhit[cptr] > mlim
-            lpass |= stime.call(sary[cptr][tptr[cptr]]).denominator.to_s(2) =~ /^1[10]?0*$/
-            next unless lpass
+          callcc do |cc| cjmp = cc end
+          break if tlist[tptr.first].nil?
+          lhit[0] += 1
+          ctime    = ztime.call
+          xtime    = stime.call tlist[tptr.first]
+          # p [tline[0],lhit[0],ntime.call(ctime),ctime] if ctime
+          if (ctime - xtime).abs > dtol && ctime > xtime then
+            # miss
+            lhit[cptr] -= 1
+            tptr[cptr] += 1
           else
-            next if tptr[cptr] >= sary[cptr].size
-            lhit[cptr] += 1
-           
-            ltime = ztime.call cptr
-            lpos  = ntime.call ltime
-            linv  = 0
-            cinv  = ->{linv *= 0.0; linv += (sary[cptr][tptr[cptr]] - lpos).round(6)}
+            # iterating closer
+            tnext = Rational(xtime - ctime,bpm_invert(tbpm))
+            # p [ntime.call(ctime),tlist[tptr.first],(xtime - ctime).rationalize(5e-3),tlen+tlenp]
+            if tnext < tlen+tlenp then
+              # within threshold
+              -> {
+                cftime = ntime.call(ctime)
+                tlook.push(*tlist.slice(tptr.first, mlim.succ))
+                this_lookup = tlook.dup
+                tlook.map!(&qsnap.call(cftime))
+                tlook.reject!(&:zero?)
+                
+                # Cancel if 1/2, 1/3, or N/1 detected
+                # p tlook
+                if tlook.empty?
+                  tchg |= true
+                  break
+                elsif !tlook.any?(&smark)
+                  next_lookup    = tlist.slice(tptr.first,mlim * 2)
+                  new_delta_time = nil
+                  this_lookup.map { |tpbpm|
+                    if (tpbpm - cftime).abs <= dtol then
+                      [tpbpm,Rational(0),0]
+                    else
+                      plus_lookup = next_lookup.map{|cctime|Rational(cctime-cftime,tpbpm-cftime).rationalize(5e-4)}
+                      valid = plus_lookup.count(&smark)
+                      plus_lookup.clear
+                      [tpbpm,(Rational(tpbpm - cftime,60/tbpm) - 1).rationalize(1e-4).abs, valid]
+                    end
+                  }.tap { |mapped_time|
+                    if true
+                      best_value = mapped_time.max{ |(tpbpm1,ratio1,match1),(tpbpm2,ratio2,match2)|
+                        (match1 <=> match2).nonzero? ||
+                        (ratio2 <=> ratio1).nonzero? ||
+                        (calibrate(tpbpm2 - cftime).denominator <=> calibrate(tpbpm1-cftime).denominator).nonzero? ||
+                        tpbpm2  <=> tpbpm1
+                      }.first - cftime
+                      new_delta_time = calibrate(best_value).round(6)
+                    end
+                    mapped_time.clear
+                  }
+                  next_lookup.clear
+                  #bpm_invert(new_delta_time).rationalize(5e-3).tap { |ndt|
+                  #  p [ctime,ndt,ndt.to_f]
+                  #}
+                  case bpm_invert(new_delta_time).rationalize(5e-3).denominator
+                  when 1
+                  when 2
+                    new_delta_time = [
+                      [3,2],[2,3]
+                    ].map { |(rn,rd)| calibrate(new_delta_time * rn / rd) }
+                      .min{ |time|
+                        bpm_invert(time).rationalize(5e-3).denominator
+                      }
+                  when 3
+                    new_delta_time = calibrate(new_delta_time / 3)
+                  else
+                    # p [ctime,ctime.round(3).to_f,bpm_invert(new_delta_time).rationalize(5e-3).to_f,new_delta_time]
+                    new_delta_time = nil
+                  end
+                  
+                  interrupt_flag  = new_delta_time.nil?
+                  unless interrupt_flag
+                    # interrupt_flag |= new_delta_time > 1
+                    -> {
+                      current_bpm = @timing_set.values.last
+                      propose_bpm = bpm_invert(new_delta_time).rationalize(5e-3)
+                      interrupt_flag |= (current_bpm - propose_bpm).abs <= 1e-5
+                      interrupt_flag |= Rational(propose_bpm,current_bpm).denominator == 1
+                      interrupt_flag |= Rational(current_bpm,propose_bpm).denominator == 1
+                    }.call
+                  end
+                  interrupt_flag |= @timing_set.key? ctime
+                  interrupt_flag |= !/^10*/.match(ctime.denominator.to_s)
+                  # p [ctime.denominator,new_delta_time]
+                  unless interrupt_flag
+                    tchg |= true
+                  
+                    tadd       += ctime  - tadd
+                    toff       += cftime - toff
+                    lhit[cptr]  = -1
+                    tline[0]    = tadd
+                    tlenp      += 8 - tlenp
+                    
+                    @timing_set.store ctime, bpm_invert(new_delta_time).rationalize(5e-3)
+                  end
+                else
+                end
+                this_lookup.clear
+              }.call
+            else
+              # Far enough within threshold
+            end
           end
-          next if lpos > tmax[-1]
-          tptr[cptr] += 1 while tptr[cptr] < sary[cptr].size and (cinv.call <= -dtol)
-          next if tptr[cptr] >= sary[cptr].size
-          
-          if lpass || (cinv.call <= dtol) then
-            tline[cptr] = ltime
-            lhit[cptr] = 0
-            sptr[cptr],tptr[cptr] = tptr[cptr],tptr[cptr].succ
-          else
-            puts "%s:%d %3d:%3d %10s %10s" % [
-              @song_id,cptr,
-              sptr[cptr],tptr[cptr],
-              stime.call(sary[cptr][sptr[cptr]]),
-              stime.call(sary[cptr][tptr[cptr]])
-            ] if false
-          end
-        ensure
-          cptr += 1
-        end while cptr < sary.size
-        # puts "#{song_id} #{lhit} #{tptr} #{sary.map(&:size)}"
-        break if cnum.all?{|cptr|a,b,c,d = tptr[cptr].succ,sary[cptr].size,ntime.call(ztime.call(cptr)),sary[cptr][-1];a >= b || c >= d}
-        tchg = cnum.all?{|cptr|tptr[cptr].succ >= sary[cptr].size || lhit[cptr] > mlim}
-      end while !tchg
-      
-      # Post-BPM Detection
-      if lhit.all?{|lnum|lnum>mlim}
-        # Redone if next denominator is valid
-        cjmp.call if cjmp && cnum.any?{|cptr|(tadd + Rational( sary[cptr][tptr[cptr]] - toff,bpm_invert(tbpm) ).rationalize(0.03) ).denominator.to_s(2) =~ /^1[10]?0*$/}
+          tlook.clear
+          tlenp -= 1 if tlenp > 0
+        end while !tchg
         
-        # Reset if previous pointer all zero
-        if sptr.all?(&:zero?) then
-          @backtrack.call if @backtrack
-          fail "badly setup timing"
-        end
-        
-        # Reset step
-        lhit.fill(Rational(0))
-        puts "diff  %s" % [cnum.map{|x|Rational(sary[x][tptr[x]] - ntime.call(ztime.call(x)),bpm_invert(tbpm)).rationalize(0.03)}]
-        puts "smea  %s" % [cnum.map{|x|ztime.call(x)}]
-        puts "vtime %s" % [cnum.map{|x|ntime.call(ztime.call(x))}]
-        puts "ptime %s" % [cnum.map{|x|sary[x][sptr[x]]}]
-        puts "ctime %s" % [cnum.map{|x|sary[x][tptr[x]]}]
-        puts '-' * 20
-        
-        # Reset pointer
-        tptr.fill{|i|sptr[i]}
-        
-        # TODO: guess from 4 ticks away from this
-        -> {
-          
-        }.call
-        break
-      else
-        # Success full break
-        break
+        # Post-BPM Detection
+        tchg &= !tlist[tptr.first.succ].nil?
       end
     end while tchg
     # p tline
@@ -216,6 +295,49 @@ module ChartAnalyzer;class AutoBPM
     tline.clear
     tmat.clear
     #puts "#{song_id}: #{tset}"
+  end
+  
+  def snap_timing
+    # Initialize variables
+    sary  = nary
+    tlist = sary.flatten.uniq.sort
+    
+    tbpm  = Rational 120
+    tadd,toff = Rational(0), @setup[:start_time]
+    
+    # TIME TO MEASURE: Measure offset + (Given time - Set offset)/(Current BPM)
+    stime = ->(time){tadd + Rational(time - toff,bpm_invert(tbpm)).rationalize(5e-3)}
+    # MEASURE TO TIME: (Given measure - Measure offset) * (Current BPM) + Set offset
+    ntime = ->(time){((time - tadd) * bpm_invert(tbpm) + toff).round(7)}
+    
+    (@timing_set.to_a + [[Float::INFINITY,Rational(120)]]).each_cons(2) do |((cms,cbpm),(nms,nbpm))|
+      tbpm  = cbpm
+      noff  = ((nms - cms)*bpm_invert(cbpm) + toff).round(7)
+      tlist.select { |ctime| ctime >= toff && ctime < noff }.each do |ctime|
+        # p [cbpm,ctime,stime.call(ctime),toff,noff]
+        @mapped_time.store(ctime,stime.call(ctime))
+      end
+      
+      toff = noff
+      tadd = nms.to_r rescue nms
+    end
+  end
+  
+  def store_timing
+    @setup[:start_time] = [@setup[:start_time].round(6),0.0].max
+    Dir.mkdir('chart.timing') if !Dir.exists?('chart.timing')
+    Dir.chdir('chart.timing') do
+      File.write(
+        "%03d.json" % @song_id,
+        JSON.neat_generate(
+          {
+            config: @setup,
+            timing: @timing_set.map{|toff,bpm| [toff.to_f,bpm.to_f]},
+            mapped: @mapped_time.map{|time,measure| [time,[measure.numerator,measure.denominator]]}.to_h
+          }
+        )
+      )
+    end
   end
   
   public
@@ -232,9 +354,16 @@ module ChartAnalyzer;class AutoBPM
     @local[:cary] ||= @local[:zary].map{ |chart_notes| chart_notes.select{|x| TapNote === x || SuperNote === x }.uniq(&:time).map(&:time) }
     @local[:nary] ||= @local[:zary].map{ |chart_notes| chart_notes.uniq(&:time).map(&:time) }
     
-    get_first_timing
+    load_fixed_timing
+    
+    if @fixed_conf.empty? then
+      get_first_timing
+      
+      detect_timing
+    end
     
     snap_timing
+    store_timing
   end
   
   alias :inspect :to_s
