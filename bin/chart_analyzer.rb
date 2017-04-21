@@ -168,7 +168,6 @@ module ChartAnalyzer; class Analyzer
     radar[:flick_count] += sp.size
     
     n.map(&:time).sort.map{|time|@bpm.mapped_time[time]}.tap do |timeset|
-      p timeset
       timeset.each_cons(2).map{|(x,y)|y-x}.tap do |times|
         # Voltage
         zt = times.dup
