@@ -167,44 +167,47 @@ module ChartAnalyzer; class Analyzer
     radar[:slide_count] = s.size
     radar[:flick_count] += sp.size
     
-    n.map(&:time).sort.map{|time|@bpm.mapped_time[time]}.each_cons(2).map{|(x,y)|y-x}.tap do |times|
-      # Voltage
-      zt = times.dup
-      xt = []
-      radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:song_length])
+    n.map(&:time).sort.map{|time|@bpm.mapped_time[time]}.tap do |timeset|
+      timeset.each_cons(2).map{|(x,y)|y-x}.tap do |times|
+        # Voltage
+        zt = times.dup
+        xt = []
+        radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:song_length])
       
-      radar[:peak_density] = times.uniq.map do |time|
-        xt.shift while !xt.empty? && xt.first < time
-        xt.push zt.shift while !zt.empty? && (xt.last.nil? || xt.inject(:+) <= 4)
-        xt.size
-      end.max
-    end.tap do |times|
-      # Chaos
-      last_chaos = Rational(0)
-      radar[:chaos_base] = times.inject(Rational(0)) do |irv, chaos_type|
-        ir = 0
-        chaos_type = last_chaos if chaos_type.numerator == 0
-        case chaos_type.denominator
-        when 1
-          ir += 0
-        when 2
-          ir += 0.5
-        when 4
-          ir += 1.0
-        else
-          ir += 1.25
+        while !zt.empty?
+          xt.shift while !xt.empty? # && xt.inject(:+)
+          xt.push(zt.shift) while !zt.empty? && (xt.last.nil? || (xt.inject(:+)+zt.last.to_f) <= 4)
+          radar[:peak_density] = [radar[:peak_density],xt.size].max
         end
-        last_chaos = chaos_type
-        irv + ir
-      end
-      radar[:chaos_pair] = j.inject(0) do |ipv, pair_set|
-        ip = 0
-        pn = pair_set.start,pair_set.end
-        ps = pn.size.times.map { |i| pn[i].pos + (pn[i].is_a?(FlickNote) ? (pn[i].dir <=> 1.5)*0.5 : 0) }
-        ip += (2 ** (2 - (ps[1] - ps[0]).abs) )
-        ipv + (ip >= 1 ? ip : 0)
-      end
-      radar[:chaos_time] = @bpm.timing_set.values.each_cons(2).inject(0){ |ibv,(bpm1,bpm2)| ibv + (bpm2 - bpm1).abs }
+      end.tap do |times|
+        # Chaos
+        last_chaos = Rational(0)
+        radar[:chaos_base] = times.inject(Rational(0)) do |irv, chaos_type|
+          ir = 0
+          chaos_type = last_chaos if chaos_type.numerator == 0
+          case chaos_type.denominator
+          when 1
+            ir += 0
+          when 2
+            ir += 0.5
+          when 4
+            ir += 1.0
+          else
+            ir += 1.25
+          end
+          last_chaos = chaos_type
+          irv + ir
+        end
+        radar[:chaos_pair] = j.inject(0) do |ipv, pair_set|
+          ip = 0
+          pn = pair_set.start,pair_set.end
+          ps = pn.size.times.map { |i| pn[i].pos + (pn[i].is_a?(FlickNote) ? (pn[i].dir <=> 1.5)*0.5 : 0) }
+          ip += (2 ** (2 - (ps[1] - ps[0]).abs) )
+          ipv + (ip >= 1 ? ip : 0)
+        end
+        radar[:chaos_time] = @bpm.timing_set.values.each_cons(2).inject(0){ |ibv,(bpm1,bpm2)| ibv + (bpm2 - bpm1).abs }
+      end.clear
+      timeset.clear
     end
     
     radar[:combo_count] = n.size
