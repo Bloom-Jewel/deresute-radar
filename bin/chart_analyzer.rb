@@ -168,6 +168,7 @@ module ChartAnalyzer; class Analyzer
     radar[:flick_count] += sp.size
     
     n.map(&:time).sort.map{|time|@bpm.mapped_time[time]}.tap do |timeset|
+      p timeset
       timeset.each_cons(2).map{|(x,y)|y-x}.tap do |times|
         # Voltage
         zt = times.dup
@@ -175,9 +176,9 @@ module ChartAnalyzer; class Analyzer
         radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:song_length])
       
         while !zt.empty?
-          xt.shift while !xt.empty? # && xt.inject(:+)
-          xt.push(zt.shift) while !zt.empty? && (xt.last.nil? || (xt.inject(:+)+zt.last.to_f) <= 4)
-          radar[:peak_density] = [radar[:peak_density],xt.size].max
+          xt.shift if !xt.empty? # && xt.inject(:+)
+          xt.push(zt.shift) while !zt.empty? && (xt.last.nil? || (xt.inject(:+)+zt.first.to_f) <= 4)
+          radar[:peak_density] = [radar[:peak_density] || 0,xt.size].max
         end
       end.tap do |times|
         # Chaos
