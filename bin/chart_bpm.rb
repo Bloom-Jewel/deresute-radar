@@ -1,8 +1,5 @@
 #!/usr/bin/env ruby
 
-require 'fiber'
-require 'continuation'
-
 require_relative 'batch_parser'
 
 module ChartAnalyzer;class AutoBPM
@@ -200,7 +197,6 @@ module ChartAnalyzer;class AutoBPM
         # Detect BPM
         cptr = 0
         begin
-          callcc do |cc| cjmp = cc end
           break if tlist[tptr.first].nil?
           lhit[0] += 1
           ctime    = ztime.call

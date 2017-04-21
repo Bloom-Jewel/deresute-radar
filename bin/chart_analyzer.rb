@@ -29,9 +29,9 @@ class Radar
     },
     chaos:  ->(c){
       tbpm = Rational(60 * c[:chaos_time],c[:song_length])
-      ird  = c[:chaos_base] * (1 + Rational(tbpm, 180))
-      ipd  = c[:chaos_pair] * (1 + Rational(tbpm, 190))
-      Rational(100 * (ird + ipd),c[:song_length])
+      ird  = c[:chaos_base] * (1 + Rational(tbpm, 480))
+      ipd  = c[:chaos_pair] * (1 + Rational(tbpm, 240))
+      Rational(72 * (ird + ipd),c[:song_length])
     }
   }.freeze
   
@@ -180,8 +180,10 @@ module ChartAnalyzer; class Analyzer
       end.max
     end.tap do |times|
       # Chaos
+      last_chaos = Rational(0)
       radar[:chaos_base] = times.inject(Rational(0)) do |irv, chaos_type|
         ir = 0
+        chaos_type = last_chaos if chaos_type.numerator == 0
         case chaos_type.denominator
         when 1
           ir += 0
@@ -190,25 +192,27 @@ module ChartAnalyzer; class Analyzer
         when 4
           ir += 1.0
         else
-          ir += 1.2
+          ir += 1.25
         end
+        last_chaos = chaos_type
         irv + ir
       end
       radar[:chaos_pair] = j.inject(0) do |ipv, pair_set|
         ip = 0
         pn = pair_set.start,pair_set.end
         ps = pn.size.times.map { |i| pn[i].pos + (pn[i].is_a?(FlickNote) ? (pn[i].dir <=> 1.5)*0.5 : 0) }
-        ipv + (2 ** (2 - (ps[1] - ps[0]).abs) )
+        ip += (2 ** (2 - (ps[1] - ps[0]).abs) )
+        ipv + (ip >= 1 ? ip : 0)
       end
       radar[:chaos_time] = @bpm.timing_set.values.each_cons(2).inject(0){ |ibv,(bpm1,bpm2)| ibv + (bpm2 - bpm1).abs }
     end
     
     radar[:combo_count] = n.size
     
-    puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
+    # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
     # puts "%s_%s voltage:%7.3f average:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:average_time],radar[:peak_density]]
     # puts "%s_%s slide:%9.3f count:%3d/%3d kicks:%3d power:%9.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:shold_count],radar[:slide_kicks],radar[:slide_power]]
-    puts "%s_%s chaos:%7.3f base:%7.3f pair:%7.3f time:%7.3f" % [song_id,diff_id,radar.raw_chaos,radar[:chaos_base],radar[:chaos_pair],radar[:chaos_time]]
+    # puts "%s_%s chaos:%7.3f base:%7.3f pair:%7.3f time:%7.3f" % [song_id,diff_id,radar.raw_chaos,radar[:chaos_base],radar[:chaos_pair],radar[:chaos_time]]
   end
   
   def update
