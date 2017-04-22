@@ -9,7 +9,7 @@ class Radar
       60 * Rational(c[:note_count],c[:chart_length]) * Rational(2,3)
     },
     voltage:->(c){
-      Rational(c[:peak_density] * c[:average_time],4) * Rational(4,5)
+      Rational(c[:peak_density] * c[:average_time],4) * Rational(2,9)
     },
     freeze: ->(c){
       1000 * Rational(c[:hold_length],c[:chart_length]) * Rational(30,100)
@@ -172,7 +172,7 @@ module ChartAnalyzer; class Analyzer
         # Voltage
         zt = times.dup
         xt = []
-        radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:song_length])
+        radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:chart_length])
       
         while !zt.empty?
           xt.shift if !xt.empty? # && xt.inject(:+)
