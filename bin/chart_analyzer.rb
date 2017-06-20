@@ -29,8 +29,8 @@ class Radar
     },
     chaos:  ->(c){
       tbpm = Rational(60 * c[:chaos_time],c[:song_length])
-      ird  = c[:chaos_base] * (1 + Rational(tbpm, 480))
-      ipd  = c[:chaos_pair] * (1 + Rational(tbpm, 240))
+      ird  = [c[:chaos_base] - 15,0.0].max * (1.0 + Rational(tbpm, 480))
+      ipd  = [c[:chaos_pair] - 24,0.0].max * (1.0 + Rational(tbpm, 240))
       Rational(72 * (ird + ipd),c[:song_length])
     }
   }.freeze
@@ -172,7 +172,7 @@ module ChartAnalyzer; class Analyzer
         # Voltage
         zt = times.dup
         xt = []
-        radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:chart_length])
+        radar[:average_time] = Rational(60 * Rational(times.inject(:+)),radar[:chart_length]).rationalize(1e-4)
       
         while !zt.empty?
           xt.shift if !xt.empty? # && xt.inject(:+)
@@ -215,7 +215,7 @@ module ChartAnalyzer; class Analyzer
     # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
     # puts "%s_%s voltage:%7.3f average:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:average_time],radar[:peak_density]]
     # puts "%s_%s slide:%9.3f count:%3d/%3d kicks:%3d power:%9.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:shold_count],radar[:slide_kicks],radar[:slide_power]]
-    # puts "%s_%s chaos:%7.3f base:%7.3f pair:%7.3f time:%7.3f" % [song_id,diff_id,radar.raw_chaos,radar[:chaos_base],radar[:chaos_pair],radar[:chaos_time]]
+    puts "%s_%s chaos:%7.3f base:%7.3f pair:%7.3f time:%7.3f" % [song_id,diff_id,radar.raw_chaos,radar[:chaos_base],radar[:chaos_pair],radar[:chaos_time]]
   end
   
   def update
@@ -241,6 +241,9 @@ module ChartAnalyzer; class Analyzer
         *res
       )
     end
+  rescue SQLite3::BusyException => sqbe
+    sleep 1.0
+    retry
   rescue Exception => e
     STDERR.puts "Ignoring Database... (#{e.class}: #{e.message})"
   end
