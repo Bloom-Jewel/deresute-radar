@@ -89,6 +89,7 @@ module Rhythm
       def round_to_valid(real_num,max_val=1<<DEEPEST_POWER_2)
         / Check Precision /
         rn = real_num
+        return rn
         b,dv,dd = 0,0,1
         eps = 1.0e-3
         harshpprox = false

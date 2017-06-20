@@ -339,9 +339,7 @@ module Deresute
       
       def timing_mode=(value)
         @@timing_mode = TimingModes.include?(value) ? value : self.timing_mode
-        ObjectSpace.each_object(self) { |cls|
-          ObjectSpace.each_object(cls,&:time!)
-        }
+        ObjectSpace.each_object(self,&:time!)
       end
     end
     
