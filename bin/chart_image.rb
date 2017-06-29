@@ -74,6 +74,20 @@ module ChartAnalyzer; class Image
     },
   ]
   
+  # Flag to prevent file replacement
+  IMAGE_LATEST       = ENV.key?('CHART_LATEST')
+  CURRENT_IMAGE_MODE = [
+                         ENV.fetch('CHART_ORIENTATION','').tap { |mode|
+                           if mode.empty? || !/^\d+$/.match(mode) then
+                             fail "CHART_ORIENTATION value must be a non-negative integer!"
+                           end
+                         }.to_i
+                       ].pop
+  # Flag to modify image printing
+  IMAGE_MODE_TOP     = 1 # Deprecated
+  IMAGE_MODE_MIRROR  = 2
+  IMAGE_MODE_BOTH    = 6
+  
   include FinalClass
   def initialize(song_id:,diff_id:)
     @song_id, @diff_id = [
@@ -156,122 +170,167 @@ module ChartAnalyzer; class Image
       sprite.write(File.join(ENV['HOME'],'Documents','rmagick',"%02d.png"%[index]))
     end if false
     
-    Magick::Image.new(basis_width,basis_height) { self.background_color = 'none' }.tap do |basis_image|
-      coord_convert = ->(lane,time) {
-        [MARGIN_LINESET + (BEAT_WIDTH * Rational(lane,6)), (BEAT_HEIGHT * time.to_r)].map(&:round)
-      }
-      
-      note_convert  = ->(note) {
-        coord_convert.call(note.pos, note.time)
-      }
-      
-      Magick::Draw.new.tap do |basis_draw|
-        basis_draw.fill('none')
-        basis_draw.stroke('black')
-        basis_draw.stroke_width(4)
+    Magick::Image.new(basis_width,basis_height) { self.background_color = 'none' }.tap do |field_image|
+      Magick::Draw.new.tap do |field_draw|
+        field_draw.fill('none')
+        field_draw.stroke('black')
+        field_draw.stroke_width(4)
         
-        basis_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
-        basis_draw.rectangle(MARGIN_LINESET,0,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT * measure_finish)
+        field_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
+        field_draw.rectangle(MARGIN_LINESET,0,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT * measure_finish)
         
-        basis_draw.text_align(Magick::RightAlign)
-        basis_draw.fill('black')
+        field_draw.text_align(Magick::RightAlign)
+        field_draw.fill('black')
         0.upto(measure_finish - 1) do |beat|
           if (beat % 4).zero? then
-            basis_draw.stroke_width(1)
-            basis_draw.font_size(16)
-            basis_draw.text(MARGIN_LINESET - 2, BEAT_HEIGHT*beat + 4, "%03d" % [(beat / 4).succ])
+            field_draw.stroke_width(1)
+            field_draw.font_size(16)
+            field_draw.text(MARGIN_LINESET - 2, BEAT_HEIGHT*(measure_finish - beat) + 4, "%03d" % [(beat / 4).succ])
           end
           
-          basis_draw.stroke_width((beat % 4).zero? ? 4 : 2)
-          basis_draw.line(MARGIN_LINESET,BEAT_HEIGHT*beat,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT*beat)
+          field_draw.stroke_width((beat % 4).zero? ? 4 : 2)
+          field_draw.line(MARGIN_LINESET,BEAT_HEIGHT*beat,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT*beat)
         end
         
-        basis_draw.text_align(Magick::LeftAlign)
-        basis_draw.stroke_width(1)
-        basis_draw.stroke('red')
-        basis_draw.fill('red')
+        field_draw.text_align(Magick::LeftAlign)
+        field_draw.stroke_width(1)
+        field_draw.stroke('red')
+        field_draw.fill('red')
         @bpm.timing_set.each do |measure, amount|
-          basis_draw.text(MARGIN_LINESET + BEAT_WIDTH - 14, (BEAT_HEIGHT*measure).floor + 4, "%05.1f" % [amount])
+          field_draw.text(MARGIN_LINESET + BEAT_WIDTH - 14, (BEAT_HEIGHT*(measure_finish - measure)).floor + 4, "%05.1f" % [amount])
         end
         
-        #basis_draw.composite(MARGIN_IMAGE,MARGIN_IMAGE,basis_width - MARGIN_IMAGE * 2,basis_height - MARGIN_IMAGE * 2,basis_image)
-        #basis_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
-        basis_draw.draw(basis_image)
+        #field_draw.composite(MARGIN_IMAGE,MARGIN_IMAGE,basis_width - MARGIN_IMAGE * 2,basis_height - MARGIN_IMAGE * 2,basis_image)
+        #field_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
+        field_draw.draw(field_image)
       end
       
-      Magick::Draw.new.tap do |path_set|
-        path_set.translate(MARGIN_IMAGE,MARGIN_IMAGE)
-        path_set.fill('none')
-        path_set.stroke('rgb(180,180,180)')
-        path_set.stroke_opacity('80%')
-        path_set.stroke_width(PATH_WIDTH)
+      is_nomirr = (CURRENT_IMAGE_MODE & IMAGE_MODE_MIRROR).zero? || ((CURRENT_IMAGE_MODE & IMAGE_MODE_BOTH) <=> IMAGE_MODE_BOTH).zero?
+      is_domirr = !(CURRENT_IMAGE_MODE & IMAGE_MODE_MIRROR).zero?
+      2.times do |nth|
+        next if nth.even? && !is_nomirr
+        next if nth.odd?  && !is_domirr
+        basis_image = field_image.dup
+        coord_convert = ->(lane,time) {
+          lane = 6 - lane if nth.odd?
+          [MARGIN_LINESET + (BEAT_WIDTH * Rational(lane,6)), (BEAT_HEIGHT * (measure_finish - time.to_r))].map(&:round)
+        }
         
-        chart_holds.each do |hold|
-          start, finish = hold[0,1]
-          path_set.line *(note_convert.call(start)+note_convert.call(finish))
-        end
+        note_convert  = ->(note) {
+          coord_convert.call(note.pos, note.time)
+        }
         
-        coords = []
-        chart_paths.each do |path|
-          path.each_cons(2) do |(start,finish)|
-            coords.pop(8) # remove previous anchor
-            is_bent  = Deresute::SuperNote === start
-            is_bent &= (finish.time - start.time).to_r >= 2
-            is_bent &= !(finish.pos <=> start.pos).zero?
-            
-            coords.push *(note_convert.call(start) * (coords.empty? ? 1 : 4))  # Prepare start anchor
-            if is_bent then
-              coords.push *(coord_convert.call(start.pos, finish.time.to_r - 0.50) * 2)
-              coords.push *coord_convert.call(start.pos, finish.time.to_r - 0.40)
-              coords.push *(coord_convert.call(start.pos + (finish.pos - start.pos) * 0.2, finish.time.to_r - 0.30) * 2)
-            end
-            coords.push *(note_convert.call(finish) * 2) # Put temporary anchor (unless final)
-            path_set.bezier *coords
-            coords.clear
-          end
-        end
-        
-        path_set.draw(basis_image)
-      end
-      
-      chart_notes.each do |note|
-        flip  = false
-        type  = case note
-                when Deresute::TapNote
-                  is_hold.call(note) ? 2 : 1
-                when Deresute::FlickNote
-                  flip = note.dir == 1 ? true : false
-                  4
-                when Deresute::SuperNote
-                  3
-                end
-        image = IMAGE_NOTES[type.pred]
-        image = image.flop if flip
-        basis_image.composite!(image, *note_convert.call(note).map { |c| c + MARGIN_IMAGE - 8 }, Magick::OverCompositeOp)
-      end
-      
-      Magick::Image.new(final_width,final_height + BEAT_HEIGHT * 1) { self.background_color = 'none' }.tap do |final_image|
-        0.step(measure_finish, split_size).each_with_index do |measure, column|
-          y_off = ((column * split_size - 0.5) * BEAT_HEIGHT).round
-          sp_w  = MARGIN_LINESET * 2 + BEAT_WIDTH
-          sp_h  = (split_size + 1) * BEAT_HEIGHT
+        Magick::Draw.new.tap do |path_set|
+          path_set.translate(MARGIN_IMAGE,MARGIN_IMAGE)
+          path_set.fill('none')
+          path_set.stroke('rgb(180,180,180)')
+          path_set.stroke_opacity('80%')
+          path_set.stroke_width(PATH_WIDTH)
           
-          pix   = basis_image.dispatch(MARGIN_IMAGE, MARGIN_IMAGE + y_off, sp_w, sp_h,'RGBA')
-          spl   = Magick::Image.constitute(sp_w, sp_h, 'RGBA', pix)
-          final_image.composite!(spl, MARGIN_IMAGE + column * sp_w, MARGIN_IMAGE, Magick::OverCompositeOp)
-          pix.clear
-          spl.destroy!
+          chart_holds.each do |hold|
+            start, finish = hold[0,1]
+            path_set.line *(note_convert.call(start)+note_convert.call(finish))
+          end
+          
+          coords = []
+          sharpness = 4
+          chart_paths.each do |path|
+            path.each_cons(2) do |(start,finish)|
+              coords.pop(sharpness << 1) # remove previous anchor
+              duration  = (finish.time - start.time).to_r
+              is_slide  = Deresute::SuperNote === start
+              is_long   = duration >= 2
+              is_cut    = !is_slide && duration >= 16
+              is_para   = (finish.pos <=> start.pos).zero?
+              
+              is_bent   = is_slide && is_long && !is_cut && !is_para
+              coords.push *(note_convert.call(start) * (coords.empty? ? 1 : sharpness))  # Prepare start anchor
+              if is_bent then
+                coords.push *(coord_convert.call(start.pos, finish.time.to_r - 0.50) * sharpness)
+                coords.push *coord_convert.call(start.pos, finish.time.to_r - 0.40)
+                coords.push *(coord_convert.call(start.pos + (finish.pos - start.pos) * 0.2, finish.time.to_r - 0.30) * sharpness)
+              end
+              coords.push *(note_convert.call(finish) * sharpness) # Put temporary anchor (unless final)
+              if !is_cut then
+                path_set.bezier *coords
+              end
+              coords.clear
+            end
+          end
+          
+          path_set.draw(basis_image)
         end
         
-        dir     = File.join(ENV['HOME'],'Documents','rmagick')
-        if false
-          final_image.write(File.join(dir,"%03d_%d.%d.png" % [@song_id, @diff_id, Time.now]))
-        else
-          final_image.write(File.join(dir,"%03d_%d.png" % [@song_id, @diff_id]))
+        chart_notes.each do |note|
+          flip  = false
+          type  = case note
+                  when Deresute::TapNote
+                    is_hold.call(note) ? 2 : 1
+                  when Deresute::FlickNote
+                    flip = note.dir == 1 ? true : false
+                    flip = !flip if nth.odd?
+                    4
+                  when Deresute::SuperNote
+                    3
+                  end
+          image = IMAGE_NOTES[type.pred]
+          image = image.flop if flip
+          basis_image.composite!(image, *note_convert.call(note).map { |c| c + MARGIN_IMAGE - 8 }, Magick::OverCompositeOp)
         end
-        final_image.destroy!
+        
+        Magick::Image.new(final_width,final_height + BEAT_HEIGHT * 1) { self.background_color = 'white' }.tap do |final_image|
+          0.step(measure_finish + split_size, split_size).each_with_index do |measure, column|
+            if false
+              y_off = ((column  * split_size - 0.5) * BEAT_HEIGHT).round
+            else
+              y_off = ((measure_finish - split_size * (column + 1) - 0.5) * BEAT_HEIGHT).round
+            end
+            sp_w  = MARGIN_LINESET * 2 + BEAT_WIDTH
+            sp_h  = (split_size + 1) * BEAT_HEIGHT
+            
+            pix   = basis_image.dispatch(MARGIN_IMAGE, MARGIN_IMAGE + y_off, sp_w, sp_h,'RGBA')
+            spl   = Magick::Image.constitute(sp_w, sp_h, 'RGBA', pix)
+            final_image.composite!(spl, MARGIN_IMAGE + (column) * sp_w, MARGIN_IMAGE, Magick::OverCompositeOp)
+            pix.clear
+            spl.destroy!
+          end
+          
+          dir     = File.join('chart.image')
+          ctime   = Time.now
+          fn      = File.join(dir,"%03d_%d.%s.%d.png")
+          fmode   = []
+          fmode  << [:NM,:MR][nth % 2]
+          
+          forepl  = Dir[File.join(dir,"%03d_%d.*.png" % [@song_id,@diff_id])]
+          frepl   = Dir[File.join(dir,"%03d_%d.%s.*.png" % [@song_id,@diff_id,fmode*''])]
+          if frepl.empty? && !forepl.empty? then
+            # force renaming to old convention
+            forepl.each do |f|
+              fm = /^(.+)\/(\d{3})[_](\d)[.](\d+)[.]png$/.match(f)
+              fp = "%s/%s_%s.NM.%s.png" % fm.to_a[1..-1]
+              File.rename(f,fp)
+              frepl.push fp
+            end
+          end if nth == 0
+          # modes :
+          # - NM  : bottom/up, no mirror (v2 default)
+          # - MR  : bottom/up, mirror
+          # - TD  : top/down, no mirror (v1 default)
+          # - TDMR: top/down, mirror
+          if IMAGE_LATEST || frepl.empty?
+            final_image.write(fn % [@song_id, @diff_id, fmode*'', ctime])
+          else
+            fn.replace frepl.max_by{|f|File.mtime(f)}
+            final_image.write(fn)
+          end
+          
+          final_image.destroy!
+        end
+        
+        basis_image.destroy!
       end
-      basis_image.destroy!
+        
+      field_image.destroy!
     end
   end
   
