@@ -135,7 +135,7 @@ module ChartAnalyzer; class Analyzer
       
       slide_length = 0.0
       radar[:flick_count] += so.size
-      radar[:slide_kicks] += [
+      slide_kicks += [
         so.inject([nil,nil,0]) { |memo,flick|
           case flick
           when SuperNote
@@ -159,8 +159,9 @@ module ChartAnalyzer; class Analyzer
         }.last - 1,
         0
       ].max
+      radar[:slide_kicks]  += slide_kicks
       radar[:slide_length] += slide_length
-      slide_chain_power  = [radar[:flick_count] + radar[:slide_kicks] - 5,0].max * 0.025
+      slide_chain_power  = [so.size + slide_kicks - 5,0].max * 0.025
       slide_length_power = (1 + slide_length) ** 0.80
       radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.90
     }
