@@ -19,6 +19,8 @@ module ChartAnalyzer; class Image
   BEAT_HEIGHT      =  32
   
   PATH_WIDTH       =   6
+  BENT_RANGE       =   0.50
+  BENT_SIZE        =   0.10
   
   IMAGE_NOTES      = [
     Magick::Image.new(17,17){ self.background_color='none' }.tap { |img|
@@ -246,9 +248,21 @@ module ChartAnalyzer; class Image
               is_bent   = is_slide && is_long && !is_cut && !is_para
               coords.push *(note_convert.call(start) * (coords.empty? ? 1 : sharpness))  # Prepare start anchor
               if is_bent then
-                coords.push *(coord_convert.call(start.pos, finish.time.to_r - 0.50) * sharpness)
-                coords.push *coord_convert.call(start.pos, finish.time.to_r - 0.40)
-                coords.push *(coord_convert.call(start.pos + (finish.pos - start.pos) * 0.2, finish.time.to_r - 0.30) * sharpness)
+                pos = [start,finish].map(&:pos)
+                midway_notes = chart_notes.select { |note| note.time > start.time && note.time < finish.time && note.pos == start.pos }
+                is_early = !midway_notes.empty?
+                midway_notes.clear
+                
+                if is_early
+                  coords.push *(coord_convert.call(pos.first + (pos.last - pos.first) * 0.2, start.time.to_r + (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
+                  coords.push *coord_convert.call(pos.last, start.time.to_r + (BENT_RANGE - BENT_SIZE))
+                  coords.push *(coord_convert.call(pos.last, start.time.to_r + BENT_RANGE) * sharpness)
+                else
+                  coords.push *(coord_convert.call(pos.first, finish.time.to_r - BENT_RANGE) * sharpness)
+                  coords.push *coord_convert.call(pos.first, finish.time.to_r - (BENT_RANGE - BENT_SIZE))
+                  coords.push *(coord_convert.call(pos.first + (pos.last - pos.first) * 0.2, finish.time.to_r - (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
+                end
+                pos.clear
               end
               coords.push *(note_convert.call(finish) * sharpness) # Put temporary anchor (unless final)
               if !is_cut then
