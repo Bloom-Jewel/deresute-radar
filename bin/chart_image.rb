@@ -16,7 +16,7 @@ module ChartAnalyzer; class Image
   MARGIN_LINESET   =  32 # LEFT RIGHT
   
   BEAT_HEIGHT      =  48
-  BEAT_WIDTH       =  BEAT_HEIGHT * 6 / 4
+  BEAT_WIDTH       =  144
   
   PATH_WIDTH       =   6
   BENT_RANGE       =   0.50
@@ -209,10 +209,15 @@ module ChartAnalyzer; class Image
       
       is_nomirr = (CURRENT_IMAGE_MODE & IMAGE_MODE_MIRROR).zero? || ((CURRENT_IMAGE_MODE & IMAGE_MODE_BOTH) <=> IMAGE_MODE_BOTH).zero?
       is_domirr = !(CURRENT_IMAGE_MODE & IMAGE_MODE_MIRROR).zero?
+      im_mode   = CURRENT_IMAGE_MODE.to_s(2)
       2.times do |nth|
         next if nth.even? && !is_nomirr
         next if nth.odd?  && !is_domirr
-        basis_image = field_image
+        if im_mode.count('1') == 1
+          basis_image = field_image
+        else
+          basis_image = field_image.dup
+        end
         coord_convert = ->(lane,time) {
           lane = 6 - lane if nth.odd?
           [MARGIN_LINESET + (BEAT_WIDTH * Rational(lane,6)), (BEAT_HEIGHT * (measure_finish - time.to_r))].map(&:round)
@@ -235,10 +240,10 @@ module ChartAnalyzer; class Image
           end
           
           coords = []
-          sharpness = 4
+          sharpness = 2
           chart_paths.each do |path|
             path.each_cons(2) do |(start,finish)|
-              coords.pop(sharpness << 1) # remove previous anchor
+              #coords.pop(sharpness << 1) # remove previous anchor
               duration  = (finish.time - start.time).to_r
               is_slide  = Deresute::SuperNote === start
               is_long   = duration >= 2
@@ -246,7 +251,7 @@ module ChartAnalyzer; class Image
               is_para   = (finish.pos <=> start.pos).zero?
               
               is_bent   = is_slide && is_long && !is_cut && !is_para
-              coords.push *(note_convert.call(start) * (coords.empty? ? 1 : sharpness))  # Prepare start anchor
+              coords.push *(note_convert.call(start))  # Prepare start anchor
               if is_bent then
                 pos = [start,finish].map(&:pos)
                 midway_notes = chart_notes.select { |note| note.time > start.time && note.time < finish.time && note.pos == start.pos }
@@ -254,19 +259,25 @@ module ChartAnalyzer; class Image
                 midway_notes.clear
                 
                 if is_early
-                  coords.push *(coord_convert.call(pos.first + (pos.last - pos.first) * 0.2, start.time.to_r + (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
-                  coords.push *coord_convert.call(pos.last, start.time.to_r + (BENT_RANGE - BENT_SIZE))
+                  coords.push *(coord_convert.call(pos.last - (pos.last - pos.first) * 0.2, start.time.to_r + (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
+                  coords.push *(coord_convert.call(pos.last, start.time.to_r + (BENT_RANGE - BENT_SIZE)))
                   coords.push *(coord_convert.call(pos.last, start.time.to_r + BENT_RANGE) * sharpness)
                 else
                   coords.push *(coord_convert.call(pos.first, finish.time.to_r - BENT_RANGE) * sharpness)
-                  coords.push *coord_convert.call(pos.first, finish.time.to_r - (BENT_RANGE - BENT_SIZE))
+                  coords.push *(coord_convert.call(pos.first, finish.time.to_r - (BENT_RANGE - BENT_SIZE)))
                   coords.push *(coord_convert.call(pos.first + (pos.last - pos.first) * 0.2, finish.time.to_r - (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
                 end
                 pos.clear
               end
-              coords.push *(note_convert.call(finish) * sharpness) # Put temporary anchor (unless final)
+              coords.push *(note_convert.call(finish)) # Put temporary anchor (unless final)
               if !is_cut then
-                path_set.bezier *coords
+                if coords.size > 4 && coords.size % 2 == 0 then
+                  path_set.bezier *coords
+                elsif coords.size == 4
+                  path_set.line   *coords
+                else
+                  $stderr.puts "Invalid Coordinate Size"
+                end
               end
               coords.clear
             end
