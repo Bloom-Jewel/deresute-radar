@@ -15,8 +15,8 @@ module ChartAnalyzer; class Image
   # the measure column margin for MEASURE# on left and BPM# on right side
   MARGIN_LINESET   =  32 # LEFT RIGHT
   
-  BEAT_WIDTH       = 144
-  BEAT_HEIGHT      =  32
+  BEAT_HEIGHT      =  48
+  BEAT_WIDTH       =  BEAT_HEIGHT * 6 / 4
   
   PATH_WIDTH       =   6
   BENT_RANGE       =   0.50
@@ -212,7 +212,7 @@ module ChartAnalyzer; class Image
       2.times do |nth|
         next if nth.even? && !is_nomirr
         next if nth.odd?  && !is_domirr
-        basis_image = field_image.dup
+        basis_image = field_image
         coord_convert = ->(lane,time) {
           lane = 6 - lane if nth.odd?
           [MARGIN_LINESET + (BEAT_WIDTH * Rational(lane,6)), (BEAT_HEIGHT * (measure_finish - time.to_r))].map(&:round)
