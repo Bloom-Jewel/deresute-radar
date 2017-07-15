@@ -135,7 +135,7 @@ module ChartAnalyzer; class Analyzer
       
       slide_length = 0.0
       radar[:flick_count] += so.size
-      slide_kicks += [
+      slide_kicks  = [
         so.inject([nil,nil,0]) { |memo,flick|
           case flick
           when SuperNote
