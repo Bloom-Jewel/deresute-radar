@@ -16,7 +16,7 @@ module ChartAnalyzer; class Image
   MARGIN_LINESET   =  32 # LEFT RIGHT
   
   BEAT_HEIGHT      =  48
-  BEAT_WIDTH       =  144
+  BEAT_WIDTH       = 144
   
   PATH_WIDTH       =   6
   BENT_RANGE       =   0.50
@@ -253,19 +253,26 @@ module ChartAnalyzer; class Image
               is_bent   = is_slide && is_long && !is_cut && !is_para
               coords.push *(note_convert.call(start))  # Prepare start anchor
               if is_bent then
-                pos = [start,finish].map(&:pos)
-                midway_notes = chart_notes.select { |note| note.time > start.time && note.time < finish.time && note.pos == start.pos }
-                is_early = !midway_notes.empty?
+                pos          = [start,finish].map(&:pos)
+                is_early     = true
+                between_time = chart_notes.select { |note| note.time > start.time && note.time < finish.time }
+                
+                midway_notes = between_time.select { |note| note.pos == start.pos }
+                is_early    &= !midway_notes.empty?
                 midway_notes.clear
                 
+                between_time.clear
+                
+                pos_ratio    = (pos.last - pos.first).abs
+                bent_range   = BENT_RANGE + pos_ratio * BENT_SIZE
                 if is_early
-                  coords.push *(coord_convert.call(pos.last - (pos.last - pos.first) * 0.2, start.time.to_r + (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
-                  coords.push *(coord_convert.call(pos.last, start.time.to_r + (BENT_RANGE - BENT_SIZE)))
-                  coords.push *(coord_convert.call(pos.last, start.time.to_r + BENT_RANGE) * sharpness)
+                  coords.push *(coord_convert.call(pos.last - (pos.last - pos.first) * 0.2, start.time.to_r + (bent_range - BENT_SIZE * 2)) * sharpness)
+                  coords.push *(coord_convert.call(pos.last, start.time.to_r + (bent_range - BENT_SIZE)))
+                  coords.push *(coord_convert.call(pos.last, start.time.to_r + bent_range) * sharpness)
                 else
-                  coords.push *(coord_convert.call(pos.first, finish.time.to_r - BENT_RANGE) * sharpness)
-                  coords.push *(coord_convert.call(pos.first, finish.time.to_r - (BENT_RANGE - BENT_SIZE)))
-                  coords.push *(coord_convert.call(pos.first + (pos.last - pos.first) * 0.2, finish.time.to_r - (BENT_RANGE - BENT_SIZE * 2)) * sharpness)
+                  coords.push *(coord_convert.call(pos.first, finish.time.to_r - bent_range) * sharpness)
+                  coords.push *(coord_convert.call(pos.first, finish.time.to_r - (bent_range - BENT_SIZE)))
+                  coords.push *(coord_convert.call(pos.first + (pos.last - pos.first) * 0.2, finish.time.to_r - (bent_range - BENT_SIZE * 2)) * sharpness)
                 end
                 pos.clear
               end
