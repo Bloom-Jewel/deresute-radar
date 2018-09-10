@@ -95,7 +95,7 @@ module ChartAnalyzer;class AutoBPM
     begin
       begin
         unless tpass
-        tnotes = notes_time.each_with_index.map{|x,i|Rational(x,tdiv[i]).round(7)}
+          tnotes = notes_time.each_with_index.map{|x,i|Rational(x,tdiv[i]).round(7)}
           # p tnotes.map(&:to_f)
           tlow  = tnotes.min
           thigh = tnotes.max
@@ -318,7 +318,7 @@ module ChartAnalyzer;class AutoBPM
   
   def snap_timing
     # Initialize variables
-    sary  = nary
+    sary  = nbry
     tlist = sary.flatten.uniq.sort
     
     tbpm  = Rational 120
@@ -372,6 +372,7 @@ module ChartAnalyzer;class AutoBPM
     @local[:zary] ||= charts.map(&:notes).map(&:values)
     @local[:cary] ||= @local[:zary].map{ |chart_notes| chart_notes.select{|x| TapNote === x || SuperNote === x }.uniq(&:time).map(&:time) }
     @local[:nary] ||= @local[:zary].map{ |chart_notes| chart_notes.uniq(&:time).map(&:time) }
+    @local[:nbry] ||= @local[:nary] | charts.map(&:raws).compact.map(&:values).map{|rawc|rawc.uniq{|t|t[:at]}.map{|t|t[:at]}.compact}
     
     load_fixed_timing
     

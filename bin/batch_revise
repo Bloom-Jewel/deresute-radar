@@ -1,0 +1,13 @@
+#!/bin/bash
+REVISION=`ls chart.timing/ | grep revised`
+for fn in $REVISION
+do
+  CID=${fn:0:3}
+  DID=`ls charts | grep -E "${CID}_[0-9]{2}"`
+  bin/chart_bpm.rb $CID
+  for dfn in $DID
+  do
+    bin/chart_analyzer.rb $CID ${dfn:4:2}
+    CHART_ORIENTATION=6 bin/chart_image.rb $CID ${dfn:4:2}
+  done
+done

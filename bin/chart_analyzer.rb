@@ -29,9 +29,9 @@ class Radar
     },
     chaos:  ->(c){
       tbpm = Rational(60 * c[:chaos_time],c[:song_length])
-      ird  = [c[:chaos_base] - 15,0.0].max * (1.0 + Rational(tbpm, 480))
-      ipd  = [c[:chaos_pair] - 24,0.0].max * (1.0 + Rational(tbpm, 240))
-      Rational(72 * (ird + ipd),c[:song_length])
+      ird  = [c[:chaos_base] - 0,0.0].max * (1.0 + Rational(tbpm, 700))
+      ipd  = [c[:chaos_pair] - 0,0.0].max * (1.0 + Rational(tbpm, 500))
+      Rational(48 * (ird + ipd),c[:song_length])
     }
   }.freeze
   
@@ -49,7 +49,7 @@ class Radar
     @counter[key]
   end
   def []=(key,value)
-    @counter[key] = Float(value)
+    @counter[key] = Float(value) rescue value.to_f
   end
   
   def inspect
@@ -80,7 +80,7 @@ module ChartAnalyzer; class Analyzer
   def initialize(song_id:,diff_id:)
     @song_id, @diff_id = [
       [[(Integer(song_id,10) rescue 0),999].min,0].max,
-      [[(Integer(diff_id,10) rescue 0),  9].min,0].max
+      [[(Integer(diff_id,10) rescue 0), 99].min,0].max
     ]
 
     @parser = Parser.new(song_id: @song_id, diff_id: @diff_id)
@@ -97,13 +97,53 @@ module ChartAnalyzer; class Analyzer
     s = chart.slides.values
     j = chart.pairs
     
+    # Determine the actual value first
+    radar[:pair_count]   = j.size
+    radar[:hold_count]   = h.size
+    radar[:slide_count]  = s.size
+    radar[:flick_count]  = n.count{|nn|nn.is_a? FlickNote}
+    radar[:shold_count]  = n.count{|nn|nn.is_a? SuperNote}
+    radar[:combo_count]  = n.size
+        
     np = n.select{|nn|nn.is_a? TapNote}
     # Find pure non hold notes
     h.map { |ho| ho[0..-1] }.flatten.each { |nnp| np.delete(nnp) }
+    # Normalize intense slide (hold abuse)
+    s.each do |sl|
+      next unless sl.first.is_a? SuperNote
+      delete_list = []
+      (0...sl.size).each do |si1|
+        sn1 = sl[si1]
+        next if delete_list.include?(sn1)
+        next unless sn1.is_a? SuperNote
+        hold_data = []
+        ((si1+1)...sl.size).each do |si2|
+          sp2 = sl[si2.pred]
+          sn2 = sl[si2]
+          next if delete_list.include?(sn2)
+          if si2.succ == sl.size || sn1.pos != sn2.pos || !sn2.is_a?(SuperNote) then
+            if sn1.pos == sp2.pos && si1 < si2.pred then
+              #puts [si1,si2].to_s
+              hold_data.concat sl[*(si1..si2.pred).to_a]
+            end
+            break
+          end
+          next unless sn2.is_a? SuperNote
+        end
+        hold_data.pop
+        hold_data.shift
+        next if hold_data.size <= 2
+        delete_list.concat hold_data
+        hold_data.clear
+      end
+      delete_list.each do |item|
+        n.delete(item)
+      end
+      delete_list.clear
+    end
     
     # Stream/Air
     radar[:note_count]   = np.size
-    radar[:pair_count]   = j.size
     radar[:song_length]  = n.map(&:time).max
     radar[:chart_length] = [:max,:min].map{|m| n.map(&:time).send(m)}.reduce(:-)
     
@@ -117,29 +157,24 @@ module ChartAnalyzer; class Analyzer
         .map { |start_time,timeset| [start_time,timeset.map(&:last).max] }
         .tap { |holds| radar[:hold_length] = holds.map(&:last).inject(:+) }
     }.call
-    radar[:hold_count]  = h.size
     
     # Slide
-    radar[:shold_count] = 0
-    radar[:flick_count] = 0
-    radar[:slide_count] = 0
     radar[:slide_kicks] = 0
     radar[:slide_power] = 0
     
     sp = h.map(&:end).select{|nn|nn.is_a? FlickNote}
-    s.each { |slide|
+    s.each do |slide|
       so = slide[0..-1]
       
       # Find flick that is not slides
       sp.delete(so.first)
       
       slide_length = 0.0
-      radar[:flick_count] += so.size
+      #radar[:flick_count] += so.size
       slide_kicks  = [
         so.inject([nil,nil,0]) { |memo,flick|
           case flick
           when SuperNote
-            radar[:shold_count] += 1
             slide_length += flick.time - memo[1].time if memo[1] && flick.pos != memo[1].pos
           when FlickNote
             case memo[1]
@@ -164,12 +199,10 @@ module ChartAnalyzer; class Analyzer
       slide_chain_power  = [so.size + slide_kicks - 5,0].max * 0.025
       slide_length_power = (1 + slide_length) ** 0.80
       radar[:slide_power] += ((slide_chain_power + 1) * (slide_length_power)) ** 0.90
-    }
-    radar[:slide_count] = s.size
-    radar[:flick_count] += sp.size
+    end
     
-    n.map(&:time).sort.map{|time|@bpm.mapped_time[time]}.tap do |timeset|
-      timeset.each_cons(2).map{|(x,y)|y-x}.tap do |times|
+    n.map{|note|[note.time,note.class]}.sort_by(&:first).map{|(time,type)|[@bpm.mapped_time[time],type]}.tap do |timeset|
+      timeset.map(&:first).compact.each_cons(2).map{|(x,y)|y-x}.tap do |times|
         # Voltage
         zt = times.dup
         xt = []
@@ -180,23 +213,25 @@ module ChartAnalyzer; class Analyzer
           xt.push(zt.shift) while !zt.empty? && (xt.last.nil? || (xt.inject(:+)+zt.first.to_f) <= 4)
           radar[:peak_density] = [radar[:peak_density] || 0,xt.size].max
         end
-      end.tap do |times|
+      end
+      timeset.tap do |times|
         # Chaos
-        last_chaos = Rational(0)
-        radar[:chaos_base] = times.inject(Rational(0)) do |irv, chaos_type|
+        first_time = times.first.first
+        
+        radar[:chaos_base] = times.inject(Rational(0)) do |irv, (chaos_time,chaos_type)|
           ir = 0
-          chaos_type = last_chaos if chaos_type.numerator == 0
-          case chaos_type.denominator
+          case chaos_time.denominator
           when 1
             ir += 0
-          when 2
-            ir += 0.5
-          when 4
-            ir += 1.0
+          when 2, 4, 8
+            ir += 0.25 * chaos_time.denominator
+          when 3, 6
+            ir += 0.15 * chaos_time.denominator
           else
             ir += 1.25
-          end
-          last_chaos = chaos_type
+          end if chaos_time > first_time
+          ir *= 0.5 if chaos_type == FlickNote
+          #last_chaos = chaos_type
           irv + ir
         end
         radar[:chaos_pair] = j.inject(0) do |ipv, pair_set|
@@ -211,17 +246,15 @@ module ChartAnalyzer; class Analyzer
       timeset.clear
     end
     
-    radar[:combo_count] = n.size
-    
     # puts "%s_%s n:%3d h:%3d s:%3d p:%3d %s" % [song_id,diff_id,n.size,h.size,s.size,j.size,radar]
-    # puts "%s_%s voltage:%7.3f average:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:average_time],radar[:peak_density]]
+    puts "%s_%s voltage:%7.3f average:%7.3f dense:%d" % [song_id,diff_id,radar.raw_voltage,radar[:average_time],radar[:peak_density]]
     # puts "%s_%s slide:%9.3f count:%3d/%3d kicks:%3d power:%9.3f" % [song_id,diff_id,radar.raw_slide,radar[:flick_count],radar[:shold_count],radar[:slide_kicks],radar[:slide_power]]
     puts "%s_%s chaos:%7.3f base:%7.3f pair:%7.3f time:%7.3f" % [song_id,diff_id,radar.raw_chaos,radar[:chaos_base],radar[:chaos_pair],radar[:chaos_time]]
   end
   
   def update
-    require 'sqlite3'
-    SQLite3::Database.new File.join(ENV['HOME'],'pre-saijue','db','production.sqlite3') do |db|
+    require 'bjp/common'
+    update_mysql do |db|
       res = []
       Radar::Categories.keys.each do |cat|
         res << radar.send("raw_#{cat}").to_f
@@ -232,21 +265,28 @@ module ChartAnalyzer; class Analyzer
         :combo_count, :song_length
       ))
       res.push @song_id,@diff_id
-      db.execute(
+      db.prepare(
         "UPDATE deresute_charts " +
         "SET " + 
         "r_stream = ?, r_voltage = ?, r_freeze = ?, r_slide = ?, r_air = ?, r_chaos = ?, " +
         "count_notes = ?, count_holds = ?, count_syncs = ?, count_flicks = ?, count_slides = ?, count_sholds = ?, count_combos = ?," +
         "song_length = ? " +
-        "WHERE chartset_id = ? AND difficulty = ?",
-        *res
-      )
+        "WHERE chartset_id = ? AND difficulty = ?"
+      ).execute(*res)
     end
+  end
+  
+  def update_sqlite3(&block)
+    BloomJewel.sqlite3(:website,:production,&block)
   rescue SQLite3::BusyException => sqbe
     sleep 1.0
     retry
   rescue Exception => e
     STDERR.puts "Ignoring Database... (#{e.class}: #{e.message})"
+  end
+  
+  def update_mysql(&block)
+    BloomJewel.mysql(:website,:production,&block)
   end
   
   def method_missing(m,*a,&b)

@@ -94,7 +94,7 @@ module ChartAnalyzer; class Image
   def initialize(song_id:,diff_id:)
     @song_id, @diff_id = [
       [[(Integer(song_id,10) rescue 0),999].min,0].max,
-      [[(Integer(diff_id,10) rescue 0),  9].min,0].max
+      [[(Integer(diff_id,10) rescue 0), 99].min,0].max
     ]
 
     @parser   = Parser.new(song_id: @song_id, diff_id: @diff_id)
@@ -113,6 +113,9 @@ module ChartAnalyzer; class Image
     time_table = {}
     @chart.notes.each do |note_id, note|
       time_table.store note.object_id, @bpm.mapped_time[note.time]
+    end
+    @chart.raws.each do |cmd_id, raw|
+      raw[:at_me] = @bpm.mapped_time[ raw[:at] ]
     end
     
     BaseNote.timing_mode = :rhythmic
@@ -145,6 +148,7 @@ module ChartAnalyzer; class Image
     chart_notes    = @chart.notes.values
     chart_holds    = @chart.holds.values
     chart_paths    = @chart.slides.values
+    chart_commands = @chart.raws.values
     
     hold_notes     = chart_holds.map { |holds| holds.each.to_a }.flatten.select { |note| Deresute::TapNote === note }
     
@@ -174,11 +178,58 @@ module ChartAnalyzer; class Image
     
     Magick::Image.new(basis_width,basis_height) { self.background_color = 'none' }.tap do |field_image|
       Magick::Draw.new.tap do |field_draw|
+        field_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
+        chart_state = []
+        chart_commands.each do |command|
+          case command[:type]
+          when 200,201,202
+            #chart_state << {command: :color, color: command[:type] - 199, meas: command[:at_me]}
+          when 210,211
+            #field_draw.text_align(Magick::RightAlign)
+            #field_draw.stroke('maroon')
+            #field_draw.fill('maroon')
+            #field_draw.text(MARGIN_LINESET + BEAT_WIDTH, (BEAT_HEIGHT)
+            is_loop = command[:type] == 210
+            chart_state << {command: :loop, loop: is_loop, meas: command[:at_me]}
+          when 92
+            chart_state << {command: :stop, meas: command[:at_me]}
+          end
+        end
+        chart_state.select{|c| [:color,:stop].include?(c[:command]) }.each_cons(2) do |state_cur,state_next|
+          color = ['#FFFFFF20','#FF006320','#006BFF20','#FFA90720'].at(state_cur[:color])
+          field_draw.stroke('none')
+          field_draw.fill(color)
+          yf = BEAT_HEIGHT*([measure_finish - state_next[:meas],0].max).floor
+          yt = BEAT_HEIGHT*(measure_finish - state_cur[:meas]).floor
+          field_draw.rectangle(MARGIN_LINESET,yf,MARGIN_LINESET+BEAT_WIDTH,yt)
+        end
+        
+        field_draw.text_align(Magick::LeftAlign)
+        chart_state.select{|c| [:loop,:stop].include?(c[:command]) }.each_cons(2) do |state_cur,state_next|
+          color = state_cur[:loop] ? '#FF008860' : 'none'
+          field_draw.stroke('none')
+          field_draw.fill(color)
+          yf = BEAT_HEIGHT*([measure_finish - state_next[:meas],0].max).floor
+          yt = BEAT_HEIGHT*(measure_finish - state_cur[:meas]).floor
+          field_draw.rectangle(MARGIN_LINESET,yf,MARGIN_LINESET+BEAT_WIDTH*1/4,yt)
+          
+          if state_cur[:loop] then
+            color = '#800000'
+            text  = 'FEVER HERE'
+          else
+            color = '#C00000'
+            text  = 'FEVER STOP'
+          end
+          field_draw.fill(color)
+          field_draw.stroke(color)
+          field_draw.font_size(8)
+          field_draw.stroke_width(0.5)
+          field_draw.text(MARGIN_LINESET + 2, yt - 4, text)
+        end
+        
         field_draw.fill('none')
         field_draw.stroke('black')
         field_draw.stroke_width(4)
-        
-        field_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
         field_draw.rectangle(MARGIN_LINESET,0,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT * measure_finish)
         
         field_draw.text_align(Magick::RightAlign)
@@ -201,7 +252,6 @@ module ChartAnalyzer; class Image
         @bpm.timing_set.each do |measure, amount|
           field_draw.text(MARGIN_LINESET + BEAT_WIDTH - 14, (BEAT_HEIGHT*(measure_finish - measure)).floor + 4, "%05.1f" % [amount])
         end
-        
         #field_draw.composite(MARGIN_IMAGE,MARGIN_IMAGE,basis_width - MARGIN_IMAGE * 2,basis_height - MARGIN_IMAGE * 2,basis_image)
         #field_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
         field_draw.draw(field_image)
@@ -305,13 +355,21 @@ module ChartAnalyzer; class Image
                   when Deresute::SuperNote
                     3
                   end
-          image = IMAGE_NOTES[type.pred]
+          image = IMAGE_NOTES[type.pred].dup
           image = image.flop if flip
+          if note.is_a?(Deresute::TapColorNote) then
+            ucolor = ['#FFFFFF','#FF0063','#006BFF','#FFA907'].at(note.color % 4)
+            #image2 = image.modulate(110,0)
+            image2 = image.color_flood_fill(image.pixel_color(8,8),ucolor,8,8,Magick::FloodfillMethod)
+            image.destroy!
+            image = image2
+          end
           basis_image.composite!(image, *note_convert.call(note).map { |c| c + MARGIN_IMAGE - 8 }, Magick::OverCompositeOp)
+          image.destroy!
         end
         
         Magick::Image.new(final_width,final_height + BEAT_HEIGHT * 1) { self.background_color = 'white' }.tap do |final_image|
-          0.step(measure_finish + split_size, split_size).each_with_index do |measure, column|
+          0.step(Rational(measure_finish,split_size).ceil * split_size, split_size).each_with_index do |measure, column|
             if false
               y_off = ((column  * split_size - 0.5) * BEAT_HEIGHT).round
             else
@@ -325,20 +383,25 @@ module ChartAnalyzer; class Image
             final_image.composite!(spl, MARGIN_IMAGE + (column) * sp_w, MARGIN_IMAGE, Magick::OverCompositeOp)
             pix.clear
             spl.destroy!
+            break if y_off < 0
           end
           
           dir     = File.join('chart.image')
           ctime   = Time.now
-          fn      = File.join(dir,"%03d_%d.%s.%d.png")
+          fn      = File.join(dir,"%03d_%02d.%s.%d.png")
           fmode   = []
           fmode  << [:NM,:MR][nth % 2]
           
-          forepl  = Dir[File.join(dir,"%03d_%d.*.png" % [@song_id,@diff_id])]
-          frepl   = Dir[File.join(dir,"%03d_%d.%s.*.png" % [@song_id,@diff_id,fmode*''])]
+          forepl  = Dir[File.join(dir,"%03d_%02d.*.png" % [@song_id,@diff_id])]
+          frepl   = Dir[File.join(dir,"%03d_%02d.%s.*.png" % [@song_id,@diff_id,fmode*''])]
           if frepl.empty? && !forepl.empty? then
             # force renaming to old convention
             forepl.each do |f|
               fm = /^(.+)\/(\d{3})[_](\d)[.](\d+)[.]png$/.match(f)
+              if !fm.is_a?(Array) || fm.size != 4
+                p fm
+                next
+              end
               fp = "%s/%s_%s.NM.%s.png" % fm.to_a[1..-1]
               File.rename(f,fp)
               frepl.push fp

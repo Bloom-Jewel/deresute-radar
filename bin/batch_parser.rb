@@ -6,8 +6,8 @@ module ChartAnalyzer
   class BatchParser
     include FinalClass
     def initialize(song_id:)
-      @parsers = Dir[("charts/%s_?.json" % String(song_id)[0,3].gsub(%r{\D},'?').rjust(3,'0'))].sort.map do |chart_name|
-        lid,did = /(\d{3})_(\d)/.match(chart_name).values_at(1,2)
+      @parsers = Dir[("charts/%s_??.json" % String(song_id)[0,3].gsub(%r{\D},'?').rjust(3,'0'))].sort.map do |chart_name|
+        lid,did = /(\d{3})_(\d{2})/.match(chart_name).values_at(1,2)
         Parser.new(song_id: lid, diff_id: did)
       end
     end

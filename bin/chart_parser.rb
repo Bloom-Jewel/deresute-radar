@@ -15,9 +15,9 @@ module ChartAnalyzer;end
 class ChartAnalyzer::Parser
   include FinalClass
   def initialize(song_id:,diff_id:)
-    @chart_name = "%03d_%1d" % [
+    @chart_name = "%03d_%02d" % [
       [[(Integer(song_id.to_s,10) rescue 0),999].min,0].max,
-      [[(Integer(diff_id.to_s,10) rescue 0),  9].min,0].max
+      [[(Integer(diff_id.to_s,10) rescue 0), 99].min,0].max
     ]
   end
   def parse
@@ -25,7 +25,7 @@ class ChartAnalyzer::Parser
     
     fn = "charts/%s.json" % @chart_name
     cc = nil
-    d = /(\d+)_(\d)/.match(fn)
+    d = /(\d+)_(\d{2})/.match(fn)
     ffn = "analyzer/#{d[0]}.chartcache"
     cvd = false
     begin
@@ -68,7 +68,7 @@ class ChartAnalyzer::Parser
       cache   = {}
       define_method :new do |*argv|
         sid = String(argv.first[:song_id])[0,3].rjust(3,'0')
-        did = String(argv.first[:diff_id])[0,1].rjust(1,'0')
+        did = String(argv.first[:diff_id])[0,2].rjust(2,'0')
         cid = "#{sid}#{did}"
         if cache.key?(cid) then
           cache.fetch(cid)

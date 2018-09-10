@@ -23,8 +23,12 @@ module Deresute
         raw[:chartData].tap do |chart_data|
           # First iteration - define notes
           chart_data.each do |note_data|
-            next unless [1,2,3].include? note_data[:type]
-            define_note id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], way:note_data[:status], type: note_data[:type]
+            kw = { id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], way:note_data[:status], type: note_data[:type] }
+            if [1,2,3].include? note_data[:type] then
+              define_note **kw
+            else
+              define_raw **kw
+            end
           end
           
           m = {h:{},s:{},p:[]}
@@ -90,6 +94,7 @@ module Deresute
         set.call :holds   , get_holds
         set.call :slides  , get_slides
         set.call :pairs   , get_pairs
+        set.call :raws    , get_raws
       end
     end
     
@@ -114,6 +119,7 @@ module Deresute
     def holds;@holds;end
     def slides;@slides;end
     def pairs;@pairs;end
+    def raws;@raws;end
     def inspect
       "<%s diff:%d note:%d hold:%d slide:%d pair:%d>" % [
         self.class,
@@ -165,6 +171,7 @@ module Deresute
       @holds = {}
       @slides = {}
       @pairs = []
+      @rawcall = {}
     end
     
     # accessors
@@ -191,20 +198,36 @@ module Deresute
       @pairs
     end
     
+    def get_raws
+      @rawcall
+    end
+    
     def set_property(key,val)
       @options.store(key,val)
     end
     
     def define_note(id:,at:,pos1:,pos2:,type:,way:false)
       noteitem = if way.is_a?(::Fixnum) && way.nonzero? then
-                   FlickNote.new(way,at,pos2,pos1)
+                   case way
+                   when 1,2
+                     FlickNote.new(way,at,pos2,pos1)
+                   when 100,101,102
+                     TapColorNote.new(way - 99,at,pos2,pos1)
+                   else
+                     $stderr.puts "WARNING! Note #{id} have status of #{way}"
+                     nil
+                   end
                  elsif type == 3
                    SuperNote.new(at,pos2,pos1)
                  else
                    TapNote.new(at,pos2,pos1)
                  end
-      
+      return if noteitem.nil?
       @notes.store(id,noteitem)
+    end
+    
+    def define_raw(id:,**opts)
+      @rawcall.store(id,opts)
     end
     
     ->(){
@@ -275,7 +298,7 @@ module Deresute
     # constructor
     def initialize(time,pos,source=nil)
       fail TypeError,sprintf("Expecting Time-object or Floats, given %s",
-        pos.class) unless [Numeric,Time].any? { |cls| cls === time }
+        time.class) unless [Numeric,Time].any? { |cls| cls === time }
       fail TypeError,sprintf("Expecting Low-ranged Integer (1..5), given %s %s",
         pos,pos.class) unless pos.is_a?(Integer) && pos.between?(1,5)
       
@@ -346,6 +369,26 @@ module Deresute
     self.timing_mode = nil
   end
   class TapNote < BaseNote
+    def color
+      4
+    end
+  end
+  class TapColorNote < TapNote
+    def initialize(color,time,position,source=nil)
+      fail TypeError,sprintf("Expecting Integer, given %s for Note Color",
+        color.class) unless [Fixnum].any? { |cls| cls === color }
+      self.color = color
+      super(time,position,source)
+    end
+    
+    def color
+      @color
+    end
+    
+    def color=(new_color)
+      return color unless new_color.is_a? Fixnum
+      @color = new_color
+    end
   end
   class SuperNote < BaseNote
   end

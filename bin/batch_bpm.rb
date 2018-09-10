@@ -6,8 +6,8 @@ module ChartAnalyzer
   class BatchAutoBPM
     include FinalClass
     def initialize(song_id:)
-      @song_sets = Dir['charts/%s_?.json' % [song_id[0,3].gsub(%r{\D},'?').rjust(3,'0')] ].map { |fn|
-        /(\d+)_\d/.match(fn)[1]
+      @song_sets = Dir['charts/%s_??.json' % [song_id[0,3].gsub(%r{\D},'?').rjust(3,'0')] ].map { |fn|
+        /(\d+)_\d{2}/.match(fn)[1]
       }.sort.uniq.map { |sid|
         AutoBPM.new(song_id:sid)
       }
