@@ -66,9 +66,12 @@ class RawJSON
   end
   
   if Object.const_defined?('JSON')
-    JSON.load_default_options.merge!({
-      symbolize_names: true
-    })
+    JSON.load_default_options.instance_exec do
+      delete(:create_additions)
+      merge!({
+        symbolize_names: true
+      })
+    end
   end
   
   GlobalConstDeclare(self);

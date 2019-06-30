@@ -207,7 +207,7 @@ module Deresute
     end
     
     def define_note(id:,at:,pos1:,pos2:,type:,way:false)
-      noteitem = if way.is_a?(::Fixnum) && way.nonzero? then
+      noteitem = if way.is_a?(::Integer) && way.nonzero? then
                    case way
                    when 1,2
                      FlickNote.new(way,at,pos2,pos1)
@@ -376,7 +376,7 @@ module Deresute
   class TapColorNote < TapNote
     def initialize(color,time,position,source=nil)
       fail TypeError,sprintf("Expecting Integer, given %s for Note Color",
-        color.class) unless [Fixnum].any? { |cls| cls === color }
+        color.class) unless [Integer].any? { |cls| cls === color }
       self.color = color
       super(time,position,source)
     end
@@ -386,7 +386,7 @@ module Deresute
     end
     
     def color=(new_color)
-      return color unless new_color.is_a? Fixnum
+      return color unless new_color.is_a? Integer
       @color = new_color
     end
   end
@@ -397,7 +397,7 @@ module Deresute
     # constructor
     def initialize(face,time,position,source=nil)
       fail TypeError,sprintf("Expecting Integer, given %s for Note Facing",
-        face.class) unless [Fixnum].any? { |cls| cls === face }
+        face.class) unless [Integer].any? { |cls| cls === face }
       self.dir = face
       super(time,position,source)
     end
@@ -409,7 +409,7 @@ module Deresute
     end
     
     def dir=(facing)
-      return dir unless facing.is_a? Fixnum
+      return dir unless facing.is_a? Integer
       @dir = facing
     end
     
