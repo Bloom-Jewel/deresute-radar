@@ -23,8 +23,11 @@ module Deresute
         raw[:chartData].tap do |chart_data|
           # First iteration - define notes
           chart_data.each do |note_data|
-            kw = { id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], way:note_data[:status], type: note_data[:type] }
-            if [1,2,3].include? note_data[:type] then
+            kw = { id:note_data[:id], at:note_data[:sec], pos1:note_data[:startPos], pos2:note_data[:finishPos], param:note_data[:status], type: note_data[:type] }
+            if [4,5,6,7].include? note_data[:type] then
+              kw[:chuunithm] = true
+              define_note **kw
+            elsif [1,2,3].include? note_data[:type] then
               define_note **kw
             else
               define_raw **kw
@@ -58,7 +61,7 @@ module Deresute
             .tap { |slide_set| next; ::Kernel.p slide_set.map{|k,v|[k,v.size]} }
             .each do |group_id,note_list|
               begin
-                m[:s][group_id] = define_slide(*note_list.map{|note|note[:id]})
+                m[:s][group_id] = define_group(*note_list.map{|note|note[:id]})
               rescue TypeError, RangeError
                 ::STDERR.puts "Bad slide chain detected: #{note_list.map(&:inspect) * ', '} (#{$!.class}: #{$!.message})"
               end
@@ -206,23 +209,33 @@ module Deresute
       @options.store(key,val)
     end
     
-    def define_note(id:,at:,pos1:,pos2:,type:,way:false)
-      noteitem = if way.is_a?(::Integer) && way.nonzero? then
-                   case way
+    def define_note(id:,at:,pos1:,pos2:,type:,param:false,chuunithm:false)
+      wi = 1
+      if chuunithm then
+        case type
+        when 4; type, param, wi = 1, false, param
+        when 5; type, param, wi = 3, false, param
+        when 6; type, param, wi = 1, 1, param
+        when 7; type, param, wi = 1, 2, param
+        end
+      end
+      noteitem = if param.is_a?(::Integer) && param.nonzero? then
+                   case param
                    when 1,2
-                     FlickNote.new(way,at,pos2,pos1)
+                     FlickNote.new(param,at,pos2,pos1)
                    when 100,101,102
-                     TapColorNote.new(way - 99,at,pos2,pos1)
+                     TapColorNote.new(param - 99,at,pos2,pos1)
                    else
-                     $stderr.puts "WARNING! Note #{id} have status of #{way}"
+                     $stderr.puts "WARNING! Note #{id} have status of #{param}"
                      nil
                    end
                  elsif type == 3
-                   SuperNote.new(at,pos2,pos1)
+                   SlideNote.new(at,pos2,pos1)
                  else
                    TapNote.new(at,pos2,pos1)
                  end
       return if noteitem.nil?
+      noteitem.width = wi
       @notes.store(id,noteitem)
     end
     
@@ -237,12 +250,12 @@ module Deresute
           if @notes.has_key? o then
             ary[i] = @notes[o]
           elsif !(o.is_a?(BaseNote) || o.is_a?(MixNotes)) then
-            fail ::TypeError, "Expected BaseNote or MixNotes class, given #{o.class}"
+            ::Kernel.fail ::TypeError, "Expected BaseNote or MixNotes class, given #{o.class}"
           end
         end
       }
       
-      ['Hold','Pair','Slide'].each do |type|
+      ['Hold','Pair','Group'].each do |type|
         define_method(:"define_#{type.downcase}") do |*notes|
           self.instance_exec(notes,&note_checker)
           ChartBuilder.const_get(:"#{type}Note").new(*notes)
@@ -251,7 +264,7 @@ module Deresute
     }.call
     
     def add_pattern(note)
-      fail ::TypeError, "Expected BaseNote or MixNotes class, given #{note.class}" unless note.is_a?(BaseNote) || note.is_a?(MixNotes)
+      ::Kernel.fail ::TypeError, "Expected BaseNote or MixNotes class, given #{note.class}" unless note.is_a?(BaseNote) || note.is_a?(MixNotes)
       @pattern << note
     end
     
@@ -276,8 +289,8 @@ module Deresute
       # new(klass,*args,&block)
       # klass [Class] - a supplied class for the builder, expected to be inheritance of BasicChart
       def new(klass,*args,&block)
-        fail TypeError, "Expected `klass' is class, given #{klass.class}" unless klass.is_a? Class
-        fail TypeError, "Expected BasicChart class, given #{klass}" unless klass.ancestors.include? BasicChart
+        ::Kernel.fail TypeError, "Expected `klass' is class, given #{klass.class}" unless klass.is_a? Class
+        ::Kernel.fail TypeError, "Expected BasicChart class, given #{klass}" unless klass.ancestors.include? BasicChart
        
         if block.is_a? Proc then
           builder = _df_new
@@ -299,12 +312,13 @@ module Deresute
     def initialize(time,pos,source=nil)
       fail TypeError,sprintf("Expecting Time-object or Floats, given %s",
         time.class) unless [Numeric,Time].any? { |cls| cls === time }
-      fail TypeError,sprintf("Expecting Low-ranged Integer (1..5), given %s %s",
-        pos,pos.class) unless pos.is_a?(Integer) && pos.between?(1,5)
+      fail TypeError,sprintf("Expecting Low-ranged Integer (1..99), given %s %s",
+        pos,pos.class) unless pos.is_a?(Integer) && pos.between?(1,99)
       
-      self.time = time
-      self.pos  = pos
-      self.cpos = source
+      self.time  = time
+      self.pos   = pos
+      self.cpos  = source
+      self.width = 1
     end
     
     # accessors
@@ -317,6 +331,9 @@ module Deresute
     end
     def cpos
       return @cpos.nil? ? @pos : @cpos
+    end
+    def width
+      @width
     end
     
     def time=(time)
@@ -331,10 +348,13 @@ module Deresute
       self.time = @time
     end
     def pos=(pos)
-      @pos  = ((pos.to_i if pos.to_i.between?(1,5)) rescue @pos)
+      @pos   = ((pos.to_i if pos.to_i.between?(1,99)) rescue @pos)
     end
     def cpos=(cpos)
-      @cpos = ((cpos.to_i() if cpos.nil? || cpos.to_i.between?(1,5)) rescue @cpos)
+      @cpos  = ((cpos.to_i if cpos.nil? || cpos.to_i.between?(-99,99)) rescue @cpos)
+    end
+    def width=(width)
+      @width = width
     end
     
     # private methods
@@ -372,6 +392,9 @@ module Deresute
     def color
       4
     end
+    def param
+      nil
+    end
   end
   class TapColorNote < TapNote
     def initialize(color,time,position,source=nil)
@@ -390,7 +413,7 @@ module Deresute
       @color = new_color
     end
   end
-  class SuperNote < BaseNote
+  class SlideNote < BaseNote
   end
   class FlickNote < BaseNote
     "Class Description"
@@ -398,19 +421,19 @@ module Deresute
     def initialize(face,time,position,source=nil)
       fail TypeError,sprintf("Expecting Integer, given %s for Note Facing",
         face.class) unless [Integer].any? { |cls| cls === face }
-      self.dir = face
+      self.param = face
       super(time,position,source)
     end
     
     # accessors
     public
-    def dir
-      @dir
+    def param
+      @param
     end
     
-    def dir=(facing)
-      return dir unless facing.is_a? Integer
-      @dir = facing
+    def param=(facing)
+      return param unless facing.is_a? Integer
+      @param = facing
     end
     
     # private methods
@@ -467,11 +490,11 @@ module Deresute
     " 
     
     # constructor
-    build base_class: [FlickNote,SuperNote], index_strict: false, size: 2..Float::INFINITY
+    build base_class: [FlickNote,SlideNote], index_strict: false, size: 2..Float::INFINITY
     
     # removes any trailing flicks unless end of SuperHold chains.
     def have_slide?
-      @data.first.is_a? SuperNote
+      @data.first.is_a? SlideNote
     end
     alias :have_shold? :have_slide?
     
@@ -483,7 +506,7 @@ module Deresute
     end
     def truncate!
       return nil if !have_slide?
-      slide_set = @data.select { |x| x.is_a? SuperNote }
+      slide_set = @data.select { |x| x.is_a? SlideNote }
       end_note  = @data[slide_set.size]
       pop_size  = self.length - (slide_set.size + (end_note.nil? ? 0 : 1))
       self.pop(pop_size) if pop_size > 0
@@ -495,12 +518,12 @@ module Deresute
     [:BaseNote ,BaseNote],
     [:TapNote  ,TapNote],
     [:FlickNote,FlickNote],
-    [:SuperNote,SuperNote],
+    [:SlideNote,SlideNote],
     
     [:MixNotes ,MixNotes],
     [:PairNote ,PairNotes],
     [:HoldNote ,HoldNote],
-    [:SlideNote,SlidePath]
+    [:GroupNote,SlidePath]
   ].each do |(const_name,const_data)|
     ChartBuilder.const_set const_name, const_data
   end

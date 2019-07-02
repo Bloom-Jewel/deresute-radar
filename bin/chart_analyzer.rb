@@ -102,7 +102,7 @@ module ChartAnalyzer; class Analyzer
     radar[:hold_count]   = h.size
     radar[:slide_count]  = s.size
     radar[:flick_count]  = n.count{|nn|nn.is_a? FlickNote}
-    radar[:shold_count]  = n.count{|nn|nn.is_a? SuperNote}
+    radar[:shold_count]  = n.count{|nn|nn.is_a? SlideNote}
     radar[:combo_count]  = n.size
         
     np = n.select{|nn|nn.is_a? TapNote}
@@ -110,25 +110,25 @@ module ChartAnalyzer; class Analyzer
     h.map { |ho| ho[0..-1] }.flatten.each { |nnp| np.delete(nnp) }
     # Normalize intense slide (hold abuse)
     s.each do |sl|
-      next unless sl.first.is_a? SuperNote
+      next unless sl.first.is_a? SlideNote
       delete_list = []
       (0...sl.size).each do |si1|
         sn1 = sl[si1]
         next if delete_list.include?(sn1)
-        next unless sn1.is_a? SuperNote
+        next unless sn1.is_a? SlideNote
         hold_data = []
         ((si1+1)...sl.size).each do |si2|
           sp2 = sl[si2.pred]
           sn2 = sl[si2]
           next if delete_list.include?(sn2)
-          if si2.succ == sl.size || sn1.pos != sn2.pos || !sn2.is_a?(SuperNote) then
+          if si2.succ == sl.size || sn1.pos != sn2.pos || !sn2.is_a?(SlideNote) then
             if sn1.pos == sp2.pos && si1 < si2.pred then
               #puts [si1,si2].to_s
               hold_data.concat sl[*(si1..si2.pred).to_a]
             end
             break
           end
-          next unless sn2.is_a? SuperNote
+          next unless sn2.is_a? SlideNote
         end
         hold_data.pop
         hold_data.shift
@@ -174,17 +174,17 @@ module ChartAnalyzer; class Analyzer
       slide_kicks  = [
         so.inject([nil,nil,0]) { |memo,flick|
           case flick
-          when SuperNote
+          when SlideNote
             slide_length += flick.time - memo[1].time if memo[1] && flick.pos != memo[1].pos
           when FlickNote
             case memo[1]
             when FlickNote
-              if memo[0] != flick.dir
-                memo[0] = flick.dir
+              if memo[0] != flick.param
+                memo[0] = flick.param
                 memo[-1]+= 1
               end
             else
-              memo[0] = flick.dir
+              memo[0] = flick.param
             end
             slide_length += flick.time - memo[1].time if memo[1]
           end
@@ -237,7 +237,7 @@ module ChartAnalyzer; class Analyzer
         radar[:chaos_pair] = j.inject(0) do |ipv, pair_set|
           ip = 0
           pn = pair_set.start,pair_set.end
-          ps = pn.size.times.map { |i| pn[i].pos + (pn[i].is_a?(FlickNote) ? (pn[i].dir <=> 1.5)*0.5 : 0) }
+          ps = pn.size.times.map { |i| pn[i].pos + (pn[i].is_a?(FlickNote) ? (pn[i].param <=> 1.5)*0.5 : 0) }
           ip += (2 ** (2 - (ps[1] - ps[0]).abs) )
           ipv + (ip >= 1 ? ip : 0)
         end

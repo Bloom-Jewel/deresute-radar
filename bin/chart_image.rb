@@ -22,6 +22,35 @@ module ChartAnalyzer; class Image
   BENT_RANGE       =   0.50
   BENT_SIZE        =   0.10
   
+  IMAGE_FLICKS     = [
+    Magick::Image.new(17,17){ self.background_color='none' }.tap { |img|
+      dr = Magick::Draw.new
+      
+      dr.stroke('black')
+      dr.fill('rgb(48,48,255)')
+      dr.circle(8,8,8,2)
+      
+      dr.stroke('none')
+      dr.fill('white')
+      dr.rectangle(4,7,8,9)
+      dr.polygon(8,5,12,8,8,11)
+      
+      dr.draw(img)
+    },
+    Magick::Image.new(17,17){ self.background_color='none' }.tap { |img|
+      dr = Magick::Draw.new
+      
+      dr.stroke('black')
+      dr.fill('rgb(48,48,255)')
+      dr.circle(8,8,8,2)
+      
+      dr.stroke('none')
+      dr.fill('white')
+      dr.polygon(6,5,10,8,6,11)
+      
+      dr.draw(img)
+    },
+  ]
   IMAGE_NOTES      = [
     Magick::Image.new(17,17){ self.background_color='none' }.tap { |img|
       dr = Magick::Draw.new
@@ -60,21 +89,79 @@ module ChartAnalyzer; class Image
       
       dr.draw(img)
     },
-    Magick::Image.new(17,17){ self.background_color='none' }.tap { |img|
-      dr = Magick::Draw.new
-      
-      dr.stroke('black')
-      dr.fill('rgb(48,48,255)')
-      dr.circle(8,8,8,2)
-      
-      dr.stroke('none')
-      dr.fill('white')
-      dr.rectangle(4,7,8,9)
-      dr.polygon(8,5,12,8,8,11)
-      
-      dr.draw(img)
-    },
+    IMAGE_FLICKS[0],
   ]
+  IMAGE_CHUUNITHM_NOTES = {}.instance_exec do
+    stretch = ->(nw,i){
+      return if nw < 17
+      return unless [0,1,2].include?(i)
+      img = Magick::Image.new(nw,17){self.background_color='none'}
+      pcs = []
+      
+      src = IMAGE_NOTES[i]
+      ->(){
+        a = src.dispatch 0,0,8,17,'RGBA'
+        b = Magick::Image.constitute 8,17,'RGBA',a
+        
+        a.clear
+        pcs << b
+      }.call
+      ->(){
+        a = src.dispatch 9,0,8,17,'RGBA'
+        b = Magick::Image.constitute 8,17,'RGBA',a
+        
+        a.clear
+        pcs << b
+      }.call
+      ->(){
+        a = src.dispatch 8,0,1,17,'RGBA'
+        b = Magick::Image.constitute 1,17,'RGBA',a
+        b.resize!(nw - 16,17)
+        
+        a.clear
+        pcs << b
+      }.call
+      pcs.shift.tap do |b|
+        img.composite!(b,0,0,Magick::OverCompositeOp)
+        b.destroy!
+      end
+      pcs.shift.tap do |b|
+        img.composite!(b,nw-8,0,Magick::OverCompositeOp)
+        b.destroy!
+      end
+      pcs.shift.tap do |b|
+        img.composite!(b,8,0,Magick::OverCompositeOp)
+        b.destroy!
+      end
+      
+      img
+    }
+    flick_stretch = ->(nw,n){
+      return if nw < 17
+      Magick::Image.new(nw,17){self.background_color='none'}.tap do |img|
+        dr = Magick::Draw.new
+        
+        dr.stroke('black')
+        dr.fill('rgb(48,48,255)')
+        dr.roundrectangle(2, 2, nw-4, 13, 8, 8)
+        
+        dr.stroke('none')
+        dr.fill('white')
+        s = nw - 17
+        n.times do |i|
+          x = 8 + (Rational(i,[n.pred,1].max) * s).round
+          dr.polygon(x-2,5,x+2,8,x-2,11)
+        end
+        
+        dr.draw(img)
+      end
+    }
+    1.upto(15) do |i|
+      s = 17+(i.pred*13.5).round
+      store i, [stretch.call(s,0),stretch.call(s,1),stretch.call(s,2),flick_stretch.call(s,2 * i - 1)]
+    end
+    self
+  end
   
   # Flag to prevent file replacement
   IMAGE_LATEST       = ENV.key?('CHART_LATEST')
@@ -90,6 +177,14 @@ module ChartAnalyzer; class Image
   IMAGE_MODE_MIRROR  = 2
   IMAGE_MODE_BOTH    = 6
   
+  CONFIGURATION      = {
+    normal: {allow_mirror:  true, field_size: 10, column_count:  5, height_scale: 1.0, object_height: 1.0},
+    casual: {allow_mirror: false, field_size: 10, column_count:  5, height_scale: 1.0, object_height: 1.0},
+    chuuni: {allow_mirror:  true, field_size: 15, column_count: 15, height_scale: 1.0, object_height: 0.5},
+    apfool: {allow_mirror: false, field_size: 10, column_count:  5, height_scale: 1.0, object_height: 1.0},
+  }
+  CONFIG_DEFAULT     = CONFIGURATION[:normal].dup.freeze
+  
   include FinalClass
   def initialize(song_id:,diff_id:)
     @song_id, @diff_id = [
@@ -103,10 +198,30 @@ module ChartAnalyzer; class Image
     @color    = 0
     @bpm.get_bpm
     
+    if @song_id > 900 then
+      @type   = :apfool
+    elsif @diff_id.between?( 1, 9) then
+      @type   = :normal
+    elsif @diff_id.between?(11,19) then
+      @type   = :casual
+    elsif @diff_id.between?(21,29) then
+      @type   = :chuuni
+    else
+      fail TypeError, "unknown chart type"
+    end
+    @config   = CONFIGURATION[@type].dup
     @image    = Magick::ImageList.new
+    process_config
   end
   
   private
+  def process_config
+    @config.update({
+      beat_width:  BEAT_WIDTH * @config[:field_size] / CONFIG_DEFAULT[:field_size],
+      beat_height: (BEAT_HEIGHT * @config[:height_scale]).round,
+    })
+  end
+  
   def time_to_measure
     return unless BaseNote.timing_mode == :exact
     
@@ -161,12 +276,12 @@ module ChartAnalyzer; class Image
     measure_finish = (measure_list.max.to_r/MEASURE_BEAT).ceil* MEASURE_BEAT + MEASURE_BEAT
     split_size     = MEASURE_BEAT * MEASURE_SPLIT
     
-    basis_width    = MARGIN_IMAGE + MARGIN_LINESET + BEAT_WIDTH + MARGIN_LINESET + MARGIN_IMAGE
-    basis_height   = MARGIN_IMAGE + BEAT_HEIGHT * measure_finish + MARGIN_IMAGE
+    basis_width    = MARGIN_IMAGE + MARGIN_LINESET + @config[:beat_width] + MARGIN_LINESET + MARGIN_IMAGE
+    basis_height   = MARGIN_IMAGE + @config[:beat_height] * measure_finish + MARGIN_IMAGE
     
     # Split Size - segment split images, every 4 beats
-    split_width    = MARGIN_LINESET + BEAT_WIDTH + MARGIN_LINESET
-    split_height   = MARGIN_IMAGE + BEAT_HEIGHT * split_size + MARGIN_IMAGE
+    split_width    = MARGIN_LINESET + @config[:beat_width] + MARGIN_LINESET
+    split_height   = MARGIN_IMAGE + @config[:beat_height] * split_size + MARGIN_IMAGE
     
     # Combined Size - segment joining
     final_width    = MARGIN_IMAGE + split_width * Rational(measure_finish,split_size).ceil + MARGIN_IMAGE
@@ -188,7 +303,7 @@ module ChartAnalyzer; class Image
             #field_draw.text_align(Magick::RightAlign)
             #field_draw.stroke('maroon')
             #field_draw.fill('maroon')
-            #field_draw.text(MARGIN_LINESET + BEAT_WIDTH, (BEAT_HEIGHT)
+            #field_draw.text(MARGIN_LINESET + @config[:beat_width], (@config[:beat_height])
             is_loop = command[:type] == 210
             chart_state << {command: :loop, loop: is_loop, meas: command[:at_me]}
           when 92
@@ -199,9 +314,9 @@ module ChartAnalyzer; class Image
           color = ['#FFFFFF20','#FF006320','#006BFF20','#FFA90720'].at(state_cur[:color])
           field_draw.stroke('none')
           field_draw.fill(color)
-          yf = BEAT_HEIGHT*([measure_finish - state_next[:meas],0].max).floor
-          yt = BEAT_HEIGHT*(measure_finish - state_cur[:meas]).floor
-          field_draw.rectangle(MARGIN_LINESET,yf,MARGIN_LINESET+BEAT_WIDTH,yt)
+          yf = @config[:beat_height]*([measure_finish - state_next[:meas],0].max).floor
+          yt = @config[:beat_height]*(measure_finish - state_cur[:meas]).floor
+          field_draw.rectangle(MARGIN_LINESET,yf,MARGIN_LINESET+@config[:beat_width],yt)
         end
         
         field_draw.text_align(Magick::LeftAlign)
@@ -209,9 +324,9 @@ module ChartAnalyzer; class Image
           color = state_cur[:loop] ? '#FF008860' : 'none'
           field_draw.stroke('none')
           field_draw.fill(color)
-          yf = BEAT_HEIGHT*([measure_finish - state_next[:meas],0].max).floor
-          yt = BEAT_HEIGHT*(measure_finish - state_cur[:meas]).floor
-          field_draw.rectangle(MARGIN_LINESET,yf,MARGIN_LINESET+BEAT_WIDTH*1/4,yt)
+          yf = @config[:beat_height]*([measure_finish - state_next[:meas],0].max).floor
+          yt = @config[:beat_height]*(measure_finish - state_cur[:meas]).floor
+          field_draw.rectangle(MARGIN_LINESET,yf,MARGIN_LINESET+@config[:beat_width]*1/4,yt)
           
           if state_cur[:loop] then
             color = '#800000'
@@ -230,7 +345,7 @@ module ChartAnalyzer; class Image
         field_draw.fill('none')
         field_draw.stroke('black')
         field_draw.stroke_width(4)
-        field_draw.rectangle(MARGIN_LINESET,0,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT * measure_finish)
+        field_draw.rectangle(MARGIN_LINESET,0,MARGIN_LINESET+@config[:beat_width],@config[:beat_height] * measure_finish)
         
         field_draw.text_align(Magick::RightAlign)
         field_draw.fill('black')
@@ -238,11 +353,11 @@ module ChartAnalyzer; class Image
           if (beat % 4).zero? then
             field_draw.stroke_width(1)
             field_draw.font_size(16)
-            field_draw.text(MARGIN_LINESET - 2, BEAT_HEIGHT*(measure_finish - beat) + 4, "%03d" % [(beat / 4).succ])
+            field_draw.text(MARGIN_LINESET - 2, @config[:beat_height]*(measure_finish - beat) + 4, "%03d" % [(beat / 4).succ])
           end
           
           field_draw.stroke_width((beat % 4).zero? ? 4 : 2)
-          field_draw.line(MARGIN_LINESET,BEAT_HEIGHT*beat,MARGIN_LINESET+BEAT_WIDTH,BEAT_HEIGHT*beat)
+          field_draw.line(MARGIN_LINESET,@config[:beat_height]*beat,MARGIN_LINESET+@config[:beat_width],@config[:beat_height]*beat)
         end
         
         field_draw.text_align(Magick::LeftAlign)
@@ -250,7 +365,7 @@ module ChartAnalyzer; class Image
         field_draw.stroke('red')
         field_draw.fill('red')
         @bpm.timing_set.each do |measure, amount|
-          field_draw.text(MARGIN_LINESET + BEAT_WIDTH - 14, (BEAT_HEIGHT*(measure_finish - measure)).floor + 4, "%05.1f" % [amount])
+          field_draw.text(MARGIN_LINESET + @config[:beat_width] - 14, (@config[:beat_height]*(measure_finish - measure)).floor + 4, "%05.1f" % [amount])
         end
         #field_draw.composite(MARGIN_IMAGE,MARGIN_IMAGE,basis_width - MARGIN_IMAGE * 2,basis_height - MARGIN_IMAGE * 2,basis_image)
         #field_draw.translate(MARGIN_IMAGE,MARGIN_IMAGE)
@@ -262,19 +377,22 @@ module ChartAnalyzer; class Image
       im_mode   = CURRENT_IMAGE_MODE.to_s(2)
       2.times do |nth|
         next if nth.even? && !is_nomirr
-        next if nth.odd?  && !is_domirr
+        next if nth.odd?  && !(is_domirr && @config[:allow_mirror])
         if im_mode.count('1') == 1
           basis_image = field_image
         else
           basis_image = field_image.dup
         end
-        coord_convert = ->(lane,time) {
-          lane = 6 - lane if nth.odd?
-          [MARGIN_LINESET + (BEAT_WIDTH * Rational(lane,6)), (BEAT_HEIGHT * (measure_finish - time.to_r))].map(&:round)
+        coord_convert = ->(lane,time,width=1) {
+          lane += Rational(width - 1,2.0).to_f if width > 1
+          lane = @config[:column_count].succ - lane if nth.odd?
+          [MARGIN_LINESET + (@config[:beat_width] * Rational(lane,@config[:column_count].succ)), (@config[:beat_height] * (measure_finish - time.to_r))].map(&:round)
+          
         }
+        # 1.upto(15) do |i| p coord_convert.call(i,10.0) end
         
-        note_convert  = ->(note) {
-          coord_convert.call(note.pos, note.time)
+        note_convert  = ->(note,center:false) {
+          coord_convert.call(note.pos, note.time, center ? note.width : 1)
         }
         
         Magick::Draw.new.tap do |path_set|
@@ -286,7 +404,7 @@ module ChartAnalyzer; class Image
           
           chart_holds.each do |hold|
             start, finish = hold[0,1]
-            path_set.line *(note_convert.call(start)+note_convert.call(finish))
+            path_set.line *(note_convert.call(start,center:true)+note_convert.call(finish,center:true))
           end
           
           coords = []
@@ -295,15 +413,15 @@ module ChartAnalyzer; class Image
             path.each_cons(2) do |(start,finish)|
               #coords.pop(sharpness << 1) # remove previous anchor
               duration  = (finish.time - start.time).to_r
-              is_slide  = Deresute::SuperNote === start
+              is_slide  = Deresute::SlideNote === start
               is_long   = duration >= 2
               is_cut    = !is_slide && duration >= 16
               is_para   = (finish.pos <=> start.pos).zero?
               
               is_bent   = is_slide && is_long && !is_cut && !is_para
-              coords.push *(note_convert.call(start))  # Prepare start anchor
+              coords.push *(note_convert.call(start,center:true))  # Prepare start anchor
               if is_bent then
-                pos          = [start,finish].map(&:pos)
+                pos          = [start,finish].map{|note| note.pos + Rational(note.width - 1,2).to_f}
                 is_early     = true
                 between_time = chart_notes.select { |note| note.time > start.time && note.time < finish.time }
                 
@@ -326,7 +444,7 @@ module ChartAnalyzer; class Image
                 end
                 pos.clear
               end
-              coords.push *(note_convert.call(finish)) # Put temporary anchor (unless final)
+              coords.push *(note_convert.call(finish,center:true)) # Put temporary anchor (unless final)
               if !is_cut then
                 if coords.size > 4 && coords.size % 2 == 0 then
                   path_set.bezier *coords
@@ -349,13 +467,31 @@ module ChartAnalyzer; class Image
                   when Deresute::TapNote
                     is_hold.call(note) ? 2 : 1
                   when Deresute::FlickNote
-                    flip = note.dir == 1 ? true : false
+                    flip = note.param == 1 ? true : false
                     flip = !flip if nth.odd?
                     4
-                  when Deresute::SuperNote
+                  when Deresute::SlideNote
                     3
                   end
-          image = IMAGE_NOTES[type.pred].dup
+          case @type
+          when :chuuni
+            image = IMAGE_CHUUNITHM_NOTES[note.width][type.pred].dup
+          else
+            image = IMAGE_NOTES[type.pred].dup
+          end
+          ->(){
+            return if (@config[:object_height] - 1.0).abs <= 1e-6
+            h_orig = image.rows
+            h_new  = (h_orig * @config[:object_height])
+            y_off  = (h_orig - h_new) / 2
+            image.resize!(image.columns,h_new.ceil)
+            image2 = Magick::Image.new(image.columns,h_orig.round){self.background_color = 'none'}
+            
+            image2.composite!(image, 0, (y_off).ceil, Magick::OverCompositeOp)
+            
+            image.destroy!
+            image = image2
+          }.call
           image = image.flop if flip
           if note.is_a?(Deresute::TapColorNote) then
             ucolor = ['#FFFFFF','#FF0063','#006BFF','#FFA907'].at(note.color % 4)
@@ -368,15 +504,15 @@ module ChartAnalyzer; class Image
           image.destroy!
         end
         
-        Magick::Image.new(final_width,final_height + BEAT_HEIGHT * 1) { self.background_color = 'white' }.tap do |final_image|
+        Magick::Image.new(final_width,final_height + @config[:beat_height] * 1) { self.background_color = 'white' }.tap do |final_image|
           0.step(Rational(measure_finish,split_size).ceil * split_size, split_size).each_with_index do |measure, column|
             if false
-              y_off = ((column  * split_size - 0.5) * BEAT_HEIGHT).round
+              y_off = ((column  * split_size - 0.5) * @config[:beat_height]).round
             else
-              y_off = ((measure_finish - split_size * (column + 1) - 0.5) * BEAT_HEIGHT).round
+              y_off = ((measure_finish - split_size * (column + 1) - 0.5) * @config[:beat_height]).round
             end
-            sp_w  = MARGIN_LINESET * 2 + BEAT_WIDTH
-            sp_h  = (split_size + 1) * BEAT_HEIGHT
+            sp_w  = MARGIN_LINESET * 2 + @config[:beat_width]
+            sp_h  = (split_size + 1) * @config[:beat_height]
             
             pix   = basis_image.dispatch(MARGIN_IMAGE, MARGIN_IMAGE + y_off, sp_w, sp_h,'RGBA')
             spl   = Magick::Image.constitute(sp_w, sp_h, 'RGBA', pix)

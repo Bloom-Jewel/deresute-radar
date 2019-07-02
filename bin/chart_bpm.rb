@@ -370,7 +370,7 @@ module ChartAnalyzer;class AutoBPM
   def get_bpm
     # Get only Tap Note that have unique time.
     @local[:zary] ||= charts.map(&:notes).map(&:values)
-    @local[:cary] ||= @local[:zary].map{ |chart_notes| chart_notes.select{|x| TapNote === x || SuperNote === x }.uniq(&:time).map(&:time) }
+    @local[:cary] ||= @local[:zary].map{ |chart_notes| chart_notes.select{|x| TapNote === x || SlideNote === x }.uniq(&:time).map(&:time) }
     @local[:nary] ||= @local[:zary].map{ |chart_notes| chart_notes.uniq(&:time).map(&:time) }
     @local[:nbry] ||= @local[:nary] | charts.map(&:raws).compact.map(&:values).map{|rawc|rawc.uniq{|t|t[:at]}.map{|t|t[:at]}.compact}
     
